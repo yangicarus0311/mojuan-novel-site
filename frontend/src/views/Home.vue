@@ -19,7 +19,7 @@
     <section class="hero-section">
       <div class="container">
         <div class="hero-card" @click="goWork(featured[0]?.id)">
-          <div class="hero-bg"></div>
+          <div class="hero-bg" :style="featured[0]?.cover_url ? { backgroundImage: `url(${featured[0].cover_url})`, backgroundSize: 'cover', backgroundPosition: 'center' } : { background: 'linear-gradient(135deg, #1a1e2e 0%, #0f1118 100%)' }"></div>
           <div class="hero-content">
             <span class="hero-badge">{{ featured[0]?.category || '推荐' }}</span>
             <h2 class="hero-title">{{ featured[0]?.title || '欢迎来到墨卷' }}</h2>
@@ -52,7 +52,9 @@
       </div>
       <div class="horizontal-scroll">
         <div class="work-card-h" v-for="w in hotWorks" :key="w.id" @click="goWork(w.id)">
-          <div class="card-cover" :style="{ background: getGradient(w.id) }"></div>
+          <div class="card-cover" :style="w.cover_url ? {} : { background: getGradient(w.id) }">
+            <img v-if="w.cover_url" :src="w.cover_url" alt="" class="cover-img" @error="onCoverError(w)" />
+          </div>
           <div class="card-info">
             <h3>{{ w.title }}</h3>
             <p class="card-author">{{ w.author }}</p>
@@ -72,7 +74,8 @@
       </div>
       <div class="works-grid">
         <div class="work-card" v-for="work in displayWorks" :key="work.id" @click="goWork(work.id)">
-          <div class="work-cover" :style="{ background: getGradient(work.id) }">
+          <div class="work-cover" :style="work.cover_url ? {} : { background: getGradient(work.id) }">
+            <img v-if="work.cover_url" :src="work.cover_url" alt="" class="cover-img" @error="onCoverError(work)" />
             <span class="work-rank" v-if="work.rank && work.rank <= 3">{{ work.rank }}</span>
           </div>
           <div class="work-info">
@@ -132,6 +135,10 @@ const getGradient = (id) => {
     'linear-gradient(135deg, #2d1f2d, #141014)',
   ]
   return gradients[(id || 0) % gradients.length]
+}
+
+const onCoverError = (work) => {
+  work.cover_url = null
 }
 
 const goWork = (id) => {
@@ -353,6 +360,12 @@ onMounted(async () => {
   height: 200px;
   border-radius: 12px;
   margin-bottom: 10px;
+  overflow: hidden;
+}
+.card-cover .cover-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 .card-info h3 {
   font-size: 14px;
@@ -397,6 +410,13 @@ onMounted(async () => {
 .work-cover {
   height: 130px;
   position: relative;
+  overflow: hidden;
+}
+.cover-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 .work-rank {
   position: absolute;
