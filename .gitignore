@@ -34,6 +34,10 @@ Thumbs.db
 # Uploads (keep folder, ignore contents)
 uploads/*
 
+# Dev tools
+screenshot-mojuan.js
+package.json
+
 # Images (keep folder, ignore large assets)
 *.png
 *.jpg
@@ -41,3 +45,4 @@ uploads/*
 *.gif
 *.svg
 !frontend/src/assets/**/*.svg
+!screenshots/*.png
