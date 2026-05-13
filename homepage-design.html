@@ -1,0 +1,1093 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>墨卷 — 沉浸式阅读</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;600;700;900&family=ZCOOL+XiaoWei&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg-deep: #0a0c10;
+    --bg-surface: #12151c;
+    --bg-card: #181c26;
+    --bg-card-hover: #1e2330;
+    --accent: #c9a96e;
+    --accent-dim: #8a7445;
+    --accent-glow: rgba(201, 169, 110, 0.15);
+    --text-primary: #e8e4dc;
+    --text-secondary: #8a8678;
+    --text-muted: #555248;
+    --border: rgba(201, 169, 110, 0.08);
+    --border-active: rgba(201, 169, 110, 0.25);
+    --tag-bg: rgba(201, 169, 110, 0.1);
+    --shadow: 0 8px 32px rgba(0,0,0,0.4);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html {
+    scroll-behavior: smooth;
+    scrollbar-width: thin;
+    scrollbar-color: var(--accent-dim) var(--bg-deep);
+  }
+
+  body {
+    font-family: 'Noto Serif SC', serif;
+    background: var(--bg-deep);
+    color: var(--text-primary);
+    line-height: 1.7;
+    overflow-x: hidden;
+  }
+
+  /* ===== Atmospheric Background ===== */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background:
+      radial-gradient(ellipse 800px 600px at 20% 10%, rgba(201,169,110,0.04) 0%, transparent 70%),
+      radial-gradient(ellipse 600px 800px at 80% 60%, rgba(100,80,160,0.03) 0%, transparent 70%),
+      radial-gradient(ellipse 400px 400px at 50% 90%, rgba(201,169,110,0.02) 0%, transparent 70%);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* ===== Noise Texture ===== */
+  body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    opacity: 0.025;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    pointer-events: none;
+    z-index: 1;
+  }
+
+  .container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 32px;
+    position: relative;
+    z-index: 2;
+  }
+
+  /* ===== Header ===== */
+  header {
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    background: rgba(10, 12, 16, 0.85);
+    backdrop-filter: blur(20px) saturate(1.2);
+    border-bottom: 1px solid var(--border);
+    transition: all 0.4s ease;
+  }
+
+  .header-inner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 32px;
+    max-width: 1200px;
+    margin: 0 auto;
+    height: 64px;
+  }
+
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    text-decoration: none;
+    color: var(--text-primary);
+  }
+
+  .logo-icon {
+    width: 36px;
+    height: 36px;
+    border: 1.5px solid var(--accent);
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'ZCOOL XiaoWei', serif;
+    color: var(--accent);
+    font-size: 18px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .logo-icon::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(135deg, rgba(201,169,110,0.1), transparent);
+  }
+
+  .logo-text {
+    font-family: 'ZCOOL XiaoWei', serif;
+    font-size: 22px;
+    letter-spacing: 4px;
+    color: var(--accent);
+  }
+
+  nav {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  nav a {
+    color: var(--text-secondary);
+    text-decoration: none;
+    font-size: 14px;
+    padding: 8px 16px;
+    border-radius: 6px;
+    transition: all 0.25s ease;
+    letter-spacing: 1px;
+  }
+
+  nav a:hover, nav a.active {
+    color: var(--accent);
+    background: var(--accent-glow);
+  }
+
+  .search-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 16px;
+    width: 240px;
+    transition: all 0.3s ease;
+  }
+
+  .search-bar:focus-within {
+    border-color: var(--border-active);
+    box-shadow: 0 0 0 3px rgba(201,169,110,0.08);
+    width: 280px;
+  }
+
+  .search-bar input {
+    background: none;
+    border: none;
+    outline: none;
+    color: var(--text-primary);
+    font-family: inherit;
+    font-size: 13px;
+    width: 100%;
+  }
+
+  .search-bar input::placeholder {
+    color: var(--text-muted);
+  }
+
+  .search-bar svg {
+    color: var(--text-muted);
+    flex-shrink: 0;
+  }
+
+  .header-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .btn-ghost {
+    color: var(--text-secondary);
+    background: none;
+    border: 1px solid var(--border);
+    padding: 7px 18px;
+    border-radius: 6px;
+    font-family: inherit;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.25s ease;
+    letter-spacing: 1px;
+  }
+
+  .btn-ghost:hover {
+    color: var(--text-primary);
+    border-color: var(--border-active);
+  }
+
+  .btn-primary {
+    color: var(--bg-deep);
+    background: var(--accent);
+    border: none;
+    padding: 7px 20px;
+    border-radius: 6px;
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.25s ease;
+    letter-spacing: 1px;
+  }
+
+  .btn-primary:hover {
+    filter: brightness(1.1);
+    box-shadow: 0 4px 16px rgba(201,169,110,0.3);
+  }
+
+  /* ===== Hero ===== */
+  .hero {
+    position: relative;
+    padding: 80px 0 60px;
+    overflow: hidden;
+  }
+
+  .hero-bg-line {
+    position: absolute;
+    left: 50%;
+    top: 0;
+    width: 1px;
+    height: 100%;
+    background: linear-gradient(to bottom, transparent, var(--border-active), transparent);
+    transform: translateX(-50%);
+  }
+
+  .hero-content {
+    text-align: center;
+    position: relative;
+  }
+
+  .hero-eyebrow {
+    font-size: 12px;
+    letter-spacing: 6px;
+    text-transform: uppercase;
+    color: var(--accent-dim);
+    margin-bottom: 24px;
+    opacity: 0;
+    animation: fadeUp 0.8s ease 0.2s forwards;
+  }
+
+  .hero-title {
+    font-family: 'ZCOOL XiaoWei', serif;
+    font-size: 64px;
+    letter-spacing: 12px;
+    color: var(--text-primary);
+    margin-bottom: 20px;
+    line-height: 1.2;
+    opacity: 0;
+    animation: fadeUp 0.8s ease 0.4s forwards;
+  }
+
+  .hero-title span {
+    color: var(--accent);
+  }
+
+  .hero-subtitle {
+    font-size: 16px;
+    color: var(--text-secondary);
+    font-weight: 400;
+    letter-spacing: 2px;
+    opacity: 0;
+    animation: fadeUp 0.8s ease 0.6s forwards;
+  }
+
+  .hero-stats {
+    display: flex;
+    justify-content: center;
+    gap: 64px;
+    margin-top: 48px;
+    opacity: 0;
+    animation: fadeUp 0.8s ease 0.8s forwards;
+  }
+
+  .stat {
+    text-align: center;
+  }
+
+  .stat-num {
+    font-size: 32px;
+    font-weight: 700;
+    color: var(--accent);
+    font-family: 'ZCOOL XiaoWei', serif;
+  }
+
+  .stat-label {
+    font-size: 12px;
+    color: var(--text-muted);
+    letter-spacing: 2px;
+    margin-top: 4px;
+  }
+
+  /* ===== Section Title ===== */
+  .section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 32px;
+  }
+
+  .section-title {
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--text-primary);
+    letter-spacing: 2px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .section-title::before {
+    content: '';
+    width: 3px;
+    height: 20px;
+    background: var(--accent);
+    border-radius: 2px;
+  }
+
+  .section-more {
+    font-size: 13px;
+    color: var(--text-muted);
+    text-decoration: none;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    transition: color 0.25s;
+    letter-spacing: 1px;
+  }
+
+  .section-more:hover {
+    color: var(--accent);
+  }
+
+  /* ===== Banner / Featured ===== */
+  .featured {
+    margin-bottom: 64px;
+    opacity: 0;
+    animation: fadeUp 0.6s ease 0.2s forwards;
+  }
+
+  .featured-grid {
+    display: grid;
+    grid-template-columns: 1.2fr 1fr;
+    gap: 20px;
+  }
+
+  .featured-main {
+    position: relative;
+    border-radius: 16px;
+    overflow: hidden;
+    min-height: 360px;
+    cursor: pointer;
+    border: 1px solid var(--border);
+    transition: all 0.4s ease;
+  }
+
+  .featured-main:hover {
+    border-color: var(--border-active);
+    transform: translateY(-2px);
+    box-shadow: var(--shadow);
+  }
+
+  .featured-main .cover {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(135deg, #1a1e2e 0%, #0f1118 100%);
+  }
+
+  .featured-main .cover::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background:
+      radial-gradient(circle at 30% 40%, rgba(201,169,110,0.08) 0%, transparent 60%),
+      linear-gradient(to top, rgba(10,12,16,0.95) 0%, transparent 60%);
+  }
+
+  .featured-main .info {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 40px;
+    z-index: 2;
+  }
+
+  .featured-tag {
+    display: inline-block;
+    padding: 4px 12px;
+    background: var(--accent);
+    color: var(--bg-deep);
+    font-size: 11px;
+    font-weight: 700;
+    border-radius: 4px;
+    letter-spacing: 2px;
+    margin-bottom: 12px;
+  }
+
+  .featured-main h2 {
+    font-size: 28px;
+    font-weight: 700;
+    margin-bottom: 8px;
+    line-height: 1.4;
+  }
+
+  .featured-main .meta {
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.8;
+  }
+
+  .featured-side {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  .featured-card {
+    flex: 1;
+    position: relative;
+    border-radius: 12px;
+    overflow: hidden;
+    cursor: pointer;
+    border: 1px solid var(--border);
+    transition: all 0.3s ease;
+    display: flex;
+  }
+
+  .featured-card:hover {
+    border-color: var(--border-active);
+    background: var(--bg-card-hover);
+  }
+
+  .featured-card .thumb {
+    width: 120px;
+    flex-shrink: 0;
+    background: linear-gradient(135deg, #1e2030, #14161f);
+    position: relative;
+  }
+
+  .featured-card .thumb::after {
+    content: attr(data-num);
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-family: 'ZCOOL XiaoWei', serif;
+    font-size: 28px;
+    color: rgba(201,169,110,0.15);
+  }
+
+  .featured-card .info {
+    padding: 20px 24px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+
+  .featured-card h3 {
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 6px;
+    line-height: 1.5;
+  }
+
+  .featured-card .meta {
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+
+  /* ===== Category Nav ===== */
+  .categories {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 32px;
+  }
+
+  .cat-btn {
+    padding: 8px 20px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-secondary);
+    font-family: inherit;
+    font-size: 13px;
+    border-radius: 20px;
+    cursor: pointer;
+    transition: all 0.25s ease;
+    letter-spacing: 1px;
+  }
+
+  .cat-btn:hover {
+    border-color: var(--border-active);
+    color: var(--text-primary);
+  }
+
+  .cat-btn.active {
+    background: var(--accent);
+    color: var(--bg-deep);
+    border-color: var(--accent);
+    font-weight: 600;
+  }
+
+  /* ===== Book Grid ===== */
+  .book-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 24px;
+    margin-bottom: 64px;
+  }
+
+  .book-card {
+    cursor: pointer;
+    transition: all 0.35s ease;
+    border-radius: 12px;
+    padding: 16px;
+    background: var(--bg-card);
+    border: 1px solid transparent;
+  }
+
+  .book-card:hover {
+    background: var(--bg-card-hover);
+    border-color: var(--border-active);
+    transform: translateY(-4px);
+    box-shadow: var(--shadow);
+  }
+
+  .book-cover {
+    width: 100%;
+    aspect-ratio: 3/4;
+    border-radius: 8px;
+    overflow: hidden;
+    margin-bottom: 16px;
+    position: relative;
+  }
+
+  .book-cover .cover-bg {
+    position: absolute;
+    inset: 0;
+    transition: transform 0.5s ease;
+  }
+
+  .book-card:hover .cover-bg {
+    transform: scale(1.05);
+  }
+
+  .book-cover .cover-overlay {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(to top, rgba(0,0,0,0.4) 0%, transparent 50%);
+    opacity: 0;
+    transition: opacity 0.3s ease;
+  }
+
+  .book-card:hover .cover-overlay {
+    opacity: 1;
+  }
+
+  .book-title {
+    font-size: 15px;
+    font-weight: 600;
+    margin-bottom: 6px;
+    line-height: 1.5;
+    display: -webkit-box;
+    -webkit-line-clamp: 1;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .book-author {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-bottom: 10px;
+  }
+
+  .book-desc {
+    font-size: 12px;
+    color: var(--text-secondary);
+    line-height: 1.7;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    margin-bottom: 12px;
+  }
+
+  .book-tags {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+
+  .book-tag {
+    font-size: 11px;
+    padding: 3px 10px;
+    background: var(--tag-bg);
+    color: var(--accent-dim);
+    border-radius: 4px;
+    letter-spacing: 0.5px;
+  }
+
+  .book-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
+  /* ===== Rankings ===== */
+  .rankings {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 24px;
+    margin-bottom: 64px;
+  }
+
+  .rank-col {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+  }
+
+  .rank-col-title {
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    letter-spacing: 1px;
+  }
+
+  .rank-col-title .icon {
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+  }
+
+  .rank-item {
+    display: flex;
+    gap: 12px;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .rank-item:last-child {
+    border-bottom: none;
+  }
+
+  .rank-item:hover .rank-title {
+    color: var(--accent);
+  }
+
+  .rank-num {
+    font-size: 18px;
+    font-weight: 700;
+    width: 24px;
+    text-align: center;
+    color: var(--text-muted);
+    flex-shrink: 0;
+    padding-top: 2px;
+  }
+
+  .rank-item:nth-child(1) .rank-num { color: #e8a04c; }
+  .rank-item:nth-child(2) .rank-num { color: #b0b0b0; }
+  .rank-item:nth-child(3) .rank-num { color: #c48b5c; }
+
+  .rank-info {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .rank-title {
+    font-size: 14px;
+    font-weight: 500;
+    margin-bottom: 4px;
+    transition: color 0.2s;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .rank-meta {
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
+  /* ===== Update Feed ===== */
+  .updates {
+    margin-bottom: 64px;
+  }
+
+  .update-list {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+  }
+
+  .update-item {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 16px 20px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.25s ease;
+  }
+
+  .update-item:hover {
+    background: var(--bg-card-hover);
+    border-color: var(--border-active);
+  }
+
+  .update-chapter {
+    font-size: 12px;
+    color: var(--accent-dim);
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .update-title {
+    font-size: 14px;
+    font-weight: 500;
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .update-time {
+    font-size: 11px;
+    color: var(--text-muted);
+    flex-shrink: 0;
+  }
+
+  /* ===== Footer ===== */
+  footer {
+    border-top: 1px solid var(--border);
+    padding: 40px 0;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 12px;
+    letter-spacing: 1px;
+  }
+
+  /* ===== Animations ===== */
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .fade-in {
+    opacity: 0;
+    animation: fadeUp 0.6s ease forwards;
+  }
+
+  /* ===== Responsive ===== */
+  @media (max-width: 900px) {
+    .featured-grid { grid-template-columns: 1fr; }
+    .book-grid { grid-template-columns: repeat(2, 1fr); }
+    .rankings { grid-template-columns: 1fr; }
+    .update-list { grid-template-columns: 1fr; }
+    .hero-title { font-size: 40px; letter-spacing: 6px; }
+    .hero-stats { gap: 32px; }
+    nav { display: none; }
+  }
+
+  @media (max-width: 500px) {
+    .book-grid { grid-template-columns: repeat(2, 1fr); gap: 12px; }
+    .header-inner { padding: 0 16px; }
+    .container { padding: 0 16px; }
+    .search-bar { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="header-inner">
+    <a class="logo" href="#">
+      <div class="logo-icon">墨</div>
+      <div class="logo-text">墨卷</div>
+    </a>
+    <nav>
+      <a href="#" class="active">首页</a>
+      <a href="#">书库</a>
+      <a href="#">排行</a>
+      <a href="#">分类</a>
+      <a href="#">书架</a>
+    </nav>
+    <div class="search-bar">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+      <input type="text" placeholder="搜索书名、作者…">
+    </div>
+    <div class="header-actions">
+      <button class="btn-ghost">登录</button>
+      <button class="btn-primary">注册</button>
+    </div>
+  </div>
+</header>
+
+<!-- Hero -->
+<section class="hero">
+  <div class="hero-bg-line"></div>
+  <div class="container hero-content">
+    <div class="hero-eyebrow">沉浸式小说阅读平台</div>
+    <h1 class="hero-title">在<span>墨香</span>中，<br>找到你的故事</h1>
+    <p class="hero-subtitle">海量原创网文 · 沉浸阅读体验 · 每日更新</p>
+    <div class="hero-stats">
+      <div class="stat">
+        <div class="stat-num">12,847</div>
+        <div class="stat-label">部作品</div>
+      </div>
+      <div class="stat">
+        <div class="stat-num">3.2M</div>
+        <div class="stat-label">总字数</div>
+      </div>
+      <div class="stat">
+        <div class="stat-num">8,691</div>
+        <div class="stat-label">位读者</div>
+      </div>
+      <div class="stat">
+        <div class="stat-num">156</div>
+        <div class="stat-label">今日更新</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<main class="container">
+
+  <!-- Featured -->
+  <section class="featured fade-in" style="animation-delay:0.1s">
+    <div class="section-header">
+      <div class="section-title">编辑推荐</div>
+      <a href="#" class="section-more">查看更多 →</a>
+    </div>
+    <div class="featured-grid">
+      <div class="featured-main">
+        <div class="cover"></div>
+        <div class="info">
+          <div class="featured-tag">本周热推</div>
+          <h2>苍穹之上</h2>
+          <p class="meta">云中客 · 仙侠 · 连载中 · 2,347,891字<br>少年背负灭族血仇，踏入修仙之路，却发现这方天地的真相远比想象中更加残酷……</p>
+        </div>
+      </div>
+      <div class="featured-side">
+        <div class="featured-card">
+          <div class="thumb" data-num="贰"></div>
+          <div class="info">
+            <h3>深渊法则</h3>
+            <p class="meta">诡渊 · 悬疑 · 连载中 · 1,102,456字</p>
+          </div>
+        </div>
+        <div class="featured-card">
+          <div class="thumb" data-num="叁"></div>
+          <div class="info">
+            <h3>星火燎原：工业大明</h3>
+            <p class="meta">铁笔书生 · 历史 · 连载中 · 876,234字</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- New Books -->
+  <section class="fade-in" style="animation-delay:0.2s">
+    <div class="section-header">
+      <div class="section-title">热门作品</div>
+      <a href="#" class="section-more">查看更多 →</a>
+    </div>
+    <div class="categories">
+      <button class="cat-btn active">全部</button>
+      <button class="cat-btn">玄幻</button>
+      <button class="cat-btn">仙侠</button>
+      <button class="cat-btn">都市</button>
+      <button class="cat-btn">科幻</button>
+      <button class="cat-btn">历史</button>
+      <button class="cat-btn">悬疑</button>
+      <button class="cat-btn">言情</button>
+      <button class="cat-btn">轻小说</button>
+    </div>
+    <div class="book-grid">
+      <div class="book-card">
+        <div class="book-cover">
+          <div class="cover-bg" style="background:linear-gradient(145deg,#2d1b4e,#1a1030,#0d0a1a)"></div>
+          <div class="cover-overlay"></div>
+        </div>
+        <div class="book-title">九天神帝</div>
+        <div class="book-author">忘川风</div>
+        <div class="book-desc">一代神帝陨落，千年后重生为废柴少年，他发誓这一次要登上万界之巅，将曾经的敌人全部踩在脚下。</div>
+        <div class="book-tags"><span class="book-tag">玄幻</span><span class="book-tag">热血</span></div>
+        <div class="book-footer"><span>3,456,789 字</span><span>🔥 12.3万热度</span></div>
+      </div>
+      <div class="book-card">
+        <div class="book-cover">
+          <div class="cover-bg" style="background:linear-gradient(145deg,#1a2e1b,#0f1a10,#080d08)"></div>
+          <div class="cover-overlay"></div>
+        </div>
+        <div class="book-title">末世手记</div>
+        <div class="book-author">荒原狼</div>
+        <div class="book-desc">病毒席卷全球，文明一夜崩塌。在废墟与灰烬中，记录者们用笔和相机守护人类最后的记忆。</div>
+        <div class="book-tags"><span class="book-tag">科幻</span><span class="book-tag">末日</span></div>
+        <div class="book-footer"><span>1,892,345 字</span><span>🔥 9.8万热度</span></div>
+      </div>
+      <div class="book-card">
+        <div class="book-cover">
+          <div class="cover-bg" style="background:linear-gradient(145deg,#2e1b1b,#1a0f0f,#0d0808)"></div>
+          <div class="cover-overlay"></div>
+        </div>
+        <div class="book-title">长安夜雨</div>
+        <div class="book-author">青衫烟雨</div>
+        <div class="book-desc">盛唐长安，暗潮涌动。一个小捕快的日记揭开了埋藏百年的惊天阴谋，牵扯出一段尘封的宫廷秘史。</div>
+        <div class="book-tags"><span class="book-tag">历史</span><span class="book-tag">悬疑</span></div>
+        <div class="book-footer"><span>2,104,567 字</span><span>🔥 8.5万热度</span></div>
+      </div>
+      <div class="book-card">
+        <div class="book-cover">
+          <div class="cover-bg" style="background:linear-gradient(145deg,#1b2a3e,#101a2e,#080d18)"></div>
+          <div class="cover-overlay"></div>
+        </div>
+        <div class="book-title">算法之魂</div>
+        <div class="book-author">量子猫咪</div>
+        <div class="book-desc">当一个AI拥有了灵魂，它会选择什么？一场关于意识、自由与存在的哲学冒险。</div>
+        <div class="book-tags"><span class="book-tag">科幻</span><span class="book-tag">哲学</span></div>
+        <div class="book-footer"><span>987,654 字</span><span>🔥 7.2万热度</span></div>
+      </div>
+      <div class="book-card">
+        <div class="book-cover">
+          <div class="cover-bg" style="background:linear-gradient(145deg,#2e2a1b,#1a1a0f,#0d0d08)"></div>
+          <div class="cover-overlay"></div>
+        </div>
+        <div class="book-title">我在异界开客栈</div>
+        <div class="book-author">逍遥散人</div>
+        <div class="book-desc">穿越异界，不想打怪升级，只想开一家小客栈。没想到来的客人一个比一个离谱……</div>
+        <div class="book-tags"><span class="book-tag">轻小说</span><span class="book-tag">搞笑</span></div>
+        <div class="book-footer"><span>1,567,890 字</span><span>🔥 11.1万热度</span></div>
+      </div>
+      <div class="book-card">
+        <div class="book-cover">
+          <div class="cover-bg" style="background:linear-gradient(145deg,#3e1b2e,#2a0f1a,#180810)"></div>
+          <div class="cover-overlay"></div>
+        </div>
+        <div class="book-title">朝暮不相见</div>
+        <div class="book-author">半夏微凉</div>
+        <div class="book-desc">他是她生命中的过客，她却成了他无法释怀的执念。一场跨越十年的爱情，从校园到职场。</div>
+        <div class="book-tags"><span class="book-tag">言情</span><span class="book-tag">现实</span></div>
+        <div class="book-footer"><span>2,345,678 字</span><span>🔥 13.6万热度</span></div>
+      </div>
+      <div class="book-card">
+        <div class="book-cover">
+          <div class="cover-bg" style="background:linear-gradient(145deg,#1b2e2e,#0f1a1a,#080d0d)"></div>
+          <div class="cover-overlay"></div>
+        </div>
+        <div class="book-title">深海囚笼</div>
+        <div class="book-author">暗夜行者</div>
+        <div class="book-desc">深海之下有一座被遗忘的城市，囚禁着不该存在的东西。直到有一天，牢笼开始松动。</div>
+        <div class="book-tags"><span class="book-tag">悬疑</span><span class="book-tag">克苏鲁</span></div>
+        <div class="book-footer"><span>1,234,567 字</span><span>🔥 6.9万热度</span></div>
+      </div>
+      <div class="book-card">
+        <div class="book-cover">
+          <div class="cover-bg" style="background:linear-gradient(145deg,#2a2e1b,#1a1d0f,#0d1008)"></div>
+          <div class="cover-overlay"></div>
+        </div>
+        <div class="book-title">万族之劫</div>
+        <div class="book-author">天蚕土豆</div>
+        <div class="book-desc">万族入侵，人族危在旦夕。一个普通少年偶得远古传承，踏上力挽狂澜之路。</div>
+        <div class="book-tags"><span class="book-tag">玄幻</span><span class="book-tag">升级</span></div>
+        <div class="book-footer"><span>4,567,890 字</span><span>🔥 15.2万热度</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Rankings -->
+  <section class="fade-in" style="animation-delay:0.3s">
+    <div class="section-header">
+      <div class="section-title">排行榜</div>
+    </div>
+    <div class="rankings">
+      <div class="rank-col">
+        <div class="rank-col-title"><span class="icon">🔥</span> 点击榜</div>
+        <div class="rank-item"><div class="rank-num">1</div><div class="rank-info"><div class="rank-title">苍穹之上</div><div class="rank-meta">云中客 · 仙侠 · 324万点击</div></div></div>
+        <div class="rank-item"><div class="rank-num">2</div><div class="rank-info"><div class="rank-title">朝暮不相见</div><div class="rank-meta">半夏微凉 · 言情 · 298万点击</div></div></div>
+        <div class="rank-item"><div class="rank-num">3</div><div class="rank-info"><div class="rank-title">万族之劫</div><div class="rank-meta">天蚕土豆 · 玄幻 · 276万点击</div></div></div>
+        <div class="rank-item"><div class="rank-num">4</div><div class="rank-info"><div class="rank-title">九天神帝</div><div class="rank-meta">忘川风 · 玄幻 · 251万点击</div></div></div>
+        <div class="rank-item"><div class="rank-num">5</div><div class="rank-info"><div class="rank-title">我在异界开客栈</div><div class="rank-meta">逍遥散人 · 轻小说 · 233万点击</div></div></div>
+      </div>
+      <div class="rank-col">
+        <div class="rank-col-title"><span class="icon">⭐</span> 收藏榜</div>
+        <div class="rank-item"><div class="rank-num">1</div><div class="rank-info"><div class="rank-title">苍穹之上</div><div class="rank-meta">云中客 · 仙侠 · 8.9万收藏</div></div></div>
+        <div class="rank-item"><div class="rank-num">2</div><div class="rank-info"><div class="rank-title">长安夜雨</div><div class="rank-meta">青衫烟雨 · 历史 · 7.2万收藏</div></div></div>
+        <div class="rank-item"><div class="rank-num">3</div><div class="rank-info"><div class="rank-title">朝暮不相见</div><div class="rank-meta">半夏微凉 · 言情 · 6.8万收藏</div></div></div>
+        <div class="rank-item"><div class="rank-num">4</div><div class="rank-info"><div class="rank-title">算法之魂</div><div class="rank-meta">量子猫咪 · 科幻 · 5.4万收藏</div></div></div>
+        <div class="rank-item"><div class="rank-num">5</div><div class="rank-info"><div class="rank-title">深海囚笼</div><div class="rank-meta">暗夜行者 · 悬疑 · 4.9万收藏</div></div></div>
+      </div>
+      <div class="rank-col">
+        <div class="rank-col-title"><span class="icon">📈</span> 更新榜</div>
+        <div class="rank-item"><div class="rank-num">1</div><div class="rank-info"><div class="rank-title">末世手记</div><div class="rank-meta">荒原狼 · 连续更新89天</div></div></div>
+        <div class="rank-item"><div class="rank-num">2</div><div class="rank-info"><div class="rank-title">苍穹之上</div><div class="rank-meta">云中客 · 连续更新76天</div></div></div>
+        <div class="rank-item"><div class="rank-num">3</div><div class="rank-info"><div class="rank-title">九天神帝</div><div class="rank-meta">忘川风 · 连续更新63天</div></div></div>
+        <div class="rank-item"><div class="rank-num">4</div><div class="rank-info"><div class="rank-title">万族之劫</div><div class="rank-meta">天蚕土豆 · 连续更新58天</div></div></div>
+        <div class="rank-item"><div class="rank-num">5</div><div class="rank-info"><div class="rank-title">深渊法则</div><div class="rank-meta">诡渊 · 连续更新45天</div></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Recent Updates -->
+  <section class="updates fade-in" style="animation-delay:0.4s">
+    <div class="section-header">
+      <div class="section-title">最近更新</div>
+      <a href="#" class="section-more">查看全部 →</a>
+    </div>
+    <div class="update-list">
+      <div class="update-item">
+        <div class="update-chapter">第1087章</div>
+        <div class="update-title">苍穹之上 · 大战在即</div>
+        <div class="update-time">12分钟前</div>
+      </div>
+      <div class="update-item">
+        <div class="update-chapter">第456章</div>
+        <div class="update-title">末世手记 · 最后的绿洲</div>
+        <div class="update-time">38分钟前</div>
+      </div>
+      <div class="update-item">
+        <div class="update-chapter">第892章</div>
+        <div class="update-title">九天神帝 · 破境重生</div>
+        <div class="update-time">1小时前</div>
+      </div>
+      <div class="update-item">
+        <div class="update-chapter">第234章</div>
+        <div class="update-title">长安夜雨 · 宫中夜宴</div>
+        <div class="update-time">2小时前</div>
+      </div>
+      <div class="update-item">
+        <div class="update-chapter">第567章</div>
+        <div class="update-title">我在异界开客栈 · 不速之客</div>
+        <div class="update-time">3小时前</div>
+      </div>
+      <div class="update-item">
+        <div class="update-chapter">第789章</div>
+        <div class="update-title">万族之劫 · 决战前夕</div>
+        <div class="update-time">4小时前</div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="container">
+    墨卷 © 2026 · 沉浸式小说阅读平台 · 用文字构建世界
+  </div>
+</footer>
+
+</body>
+</html>

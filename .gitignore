@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.env
+*.egg-info/
+dist/
+build/
+
+# Node
+node_modules/
+dist/
+*.tsbuildinfo
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Database
+*.db
+*.sqlite3
+
+# Uploads (keep folder, ignore contents)
+uploads/*
+
+# Images (keep folder, ignore large assets)
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.svg
+!frontend/src/assets/**/*.svg
