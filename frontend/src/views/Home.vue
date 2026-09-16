@@ -26,7 +26,7 @@
             <p class="hero-author">{{ featured[0]?.author || '' }}</p>
             <p class="hero-desc">{{ featured[0]?.description?.slice(0, 80) || '沉浸式阅读体验，开启你的阅读之旅' }}...</p>
             <div class="hero-stats">
-              <span>{{ featured[0]?.wordCount?.toLocaleString() || 0 }}字</span>
+              <span>{{ (featured[0]?.word_count ?? featured[0]?.wordCount ?? 0).toLocaleString() }}字</span>
               <span>{{ featured[0]?.clicks?.toLocaleString() || 0 }}阅读</span>
             </div>
           </div>
