@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from app.core.database import get_db
 from app.core.auth import get_current_user
@@ -20,10 +20,10 @@ router = APIRouter(prefix="/admin/payment", tags=["admin"])
 @router.get("/plans", response_model=List[PaymentPlanSchema])
 def admin_get_payment_plans(
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user)
+    current_user: User = Depends(get_current_user)
 ):
     """管理后台：获取所有支付套餐"""
-    if current_user.get("is_admin") != 1:
+    if current_user.is_admin != 1:
         raise HTTPException(status_code=403, detail="需要管理员权限")
     
     return db.query(PaymentPlan).all()
@@ -33,10 +33,10 @@ def admin_get_payment_plans(
 def admin_create_payment_plan(
     plan_data: PaymentPlanSchema,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user)
+    current_user: User = Depends(get_current_user)
 ):
     """管理后台：创建支付套餐"""
-    if current_user.get("is_admin") != 1:
+    if current_user.is_admin != 1:
         raise HTTPException(status_code=403, detail="需要管理员权限")
     
     # 检查套餐名称是否已存在
@@ -62,10 +62,10 @@ def admin_update_payment_plan(
     plan_id: int,
     plan_data: PaymentPlanSchema,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user)
+    current_user: User = Depends(get_current_user)
 ):
     """管理后台：更新支付套餐"""
-    if current_user.get("is_admin") != 1:
+    if current_user.is_admin != 1:
         raise HTTPException(status_code=403, detail="需要管理员权限")
     
     plan = db.query(PaymentPlan).filter(PaymentPlan.id == plan_id).first()
@@ -97,10 +97,10 @@ def admin_get_orders(
     start_date: Optional[str] = Query(None),
     end_date: Optional[str] = Query(None),
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user)
+    current_user: User = Depends(get_current_user)
 ):
     """管理后台：获取订单列表（支持筛选）"""
-    if current_user.get("is_admin") != 1:
+    if current_user.is_admin != 1:
         raise HTTPException(status_code=403, detail="需要管理员权限")
     
     query = db.query(Order)
@@ -124,10 +124,10 @@ def admin_get_orders(
 def admin_get_order_detail(
     order_id: int,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user)
+    current_user: User = Depends(get_current_user)
 ):
     """管理后台：获取订单详情"""
-    if current_user.get("is_admin") != 1:
+    if current_user.is_admin != 1:
         raise HTTPException(status_code=403, detail="需要管理员权限")
     
     order = db.query(Order).filter(Order.id == order_id).first()
@@ -141,10 +141,10 @@ def admin_get_order_detail(
 def admin_get_revenue_stats(
     period: str = "day",  # day, week, month, year
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user)
+    current_user: User = Depends(get_current_user)
 ):
     """管理后台：获取收入统计"""
-    if current_user.get("is_admin") != 1:
+    if current_user.is_admin != 1:
         raise HTTPException(status_code=403, detail="需要管理员权限")
     
     from sqlalchemy import func
@@ -193,10 +193,10 @@ def admin_get_revenue_stats(
 @router.get("/stats/users")
 def admin_get_user_stats(
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user)
+    current_user: User = Depends(get_current_user)
 ):
     """管理后台：获取用户付费统计"""
-    if current_user.get("is_admin") != 1:
+    if current_user.is_admin != 1:
         raise HTTPException(status_code=403, detail="需要管理员权限")
     
     # 统计VIP用户数
@@ -239,10 +239,10 @@ def admin_get_user_stats(
 def admin_get_work_prices(
     work_id: Optional[int] = Query(None),
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user)
+    current_user: User = Depends(get_current_user)
 ):
     """管理后台：获取作品价格设置"""
-    if current_user.get("is_admin") != 1:
+    if current_user.is_admin != 1:
         raise HTTPException(status_code=403, detail="需要管理员权限")
     
     query = db.query(WorkPrice)
@@ -258,10 +258,10 @@ def admin_update_work_price(
     chapter_price: float = Query(0.0),
     is_premium: bool = Query(False),
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user)
+    current_user: User = Depends(get_current_user)
 ):
     """管理后台：更新作品价格设置"""
-    if current_user.get("is_admin") != 1:
+    if current_user.is_admin != 1:
         raise HTTPException(status_code=403, detail="需要管理员权限")
     
     # 检查作品是否存在
@@ -290,10 +290,10 @@ def admin_get_monthly_tickets(
     start_date: Optional[str] = Query(None),
     end_date: Optional[str] = Query(None),
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user)
+    current_user: User = Depends(get_current_user)
 ):
     """管理后台：获取月票记录"""
-    if current_user.get("is_admin") != 1:
+    if current_user.is_admin != 1:
         raise HTTPException(status_code=403, detail="需要管理员权限")
     
     query = db.query(MonthlyTicket)
@@ -314,10 +314,10 @@ def admin_get_monthly_tickets(
 def admin_get_monthly_ticket_rankings(
     limit: int = Query(10, ge=1, le=100),
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user)
+    current_user: User = Depends(get_current_user)
 ):
     """管理后台：获取月票排行榜"""
-    if current_user.get("is_admin") != 1:
+    if current_user.is_admin != 1:
         raise HTTPException(status_code=403, detail="需要管理员权限")
     
     from sqlalchemy import func

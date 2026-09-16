@@ -124,7 +124,7 @@
 
   <!-- 加载中 -->
   <div class="loading-page" v-else>
-    <p>加载中...</p>
+    <p v-if="!loadError">加载中...</p><div v-else role="alert">{{ loadError }} <button @click="loadWork">重试</button></div>
   </div>
 </template>
 
@@ -136,6 +136,7 @@ import api from '../api'
 const route = useRoute()
 const router = useRouter()
 const work = ref(null)
+const loadError = ref('')
 const chapterList = ref([])
 const reviews = ref([])
 const similarWorks = ref([])
@@ -174,10 +175,16 @@ const formatDate = (d) => {
   return new Date(d).toLocaleDateString('zh-CN')
 }
 
-const startRead = () => {
-  if (chapterList.value.length) {
-    router.push(`/works/${work.value.id}/chapters/${chapterList.value[0].id}`)
+const startRead = async () => {
+  if (!chapterList.value.length) return
+  let chapterId = chapterList.value[0].id
+  if (isLoggedIn.value) {
+    try {
+      const { data } = await api.get(`/bookshelf/progress/${work.value.id}`)
+      if (chapterList.value.some(chapter => chapter.id === data.chapter_id)) chapterId = data.chapter_id
+    } catch {}
   }
+  router.push(`/works/${work.value.id}/chapters/${chapterId}`)
 }
 
 const readChapter = (chapterId) => {
@@ -229,6 +236,7 @@ const toggleLike = async (r) => {
 }
 
 async function loadReviews() {
+  if (!isLoggedIn.value) return
   try {
     const res = await api.get('/social/reviews', { params: { work_id: work.value.id, sort: 'created_at' } })
     reviews.value = res.data || []
@@ -251,7 +259,8 @@ async function checkShelf() {
   } catch (e) { }
 }
 
-onMounted(async () => {
+async function loadWork() {
+  loadError.value = ''
   try {
     const [workRes, chaptersRes] = await Promise.all([
       api.get(`/works/${route.params.id}`),
@@ -266,9 +275,10 @@ onMounted(async () => {
       checkShelf()
     ])
   } catch (e) {
-    console.error('加载失败', e)
+    loadError.value = '作品加载失败，请重试。'
   }
-})
+}
+onMounted(loadWork)
 </script>
 
 <style scoped>

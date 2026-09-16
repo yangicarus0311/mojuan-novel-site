@@ -19,10 +19,15 @@
 
     <!-- 阅读主体 -->
     <main class="reader-main" ref="readerMain" @click="toggleHeader" @touchstart="onTouchStart" @touchend="onTouchEnd">
+      <div v-if="loading" class="reader-status" role="status">正在加载章节...</div>
+      <div v-else-if="loadError" class="reader-status" role="alert">
+        <p>{{ loadError }}</p><button @click.stop="loadReader">重试</button>
+        <button @click.stop="goBack">返回目录</button>
+      </div>
       <!-- 翻页模式 -->
-      <template v-if="readingMode === 'pagination'">
+      <template v-else-if="chapter && readingMode === 'pagination'">
         <div class="page-container" ref="pageContainer">
-          <div class="page-content" :style="pageStyle" v-html="currentPageContent"></div>
+          <div class="page-content" ref="pageText" :style="pageStyle">{{ currentPageContent }}</div>
         </div>
         <!-- 翻页热区 -->
         <div class="page-hotspots">
@@ -33,8 +38,8 @@
       </template>
       
       <!-- 滚动模式 -->
-      <template v-else>
-        <article class="scroll-content" :style="scrollStyle">
+      <template v-else-if="chapter">
+        <article class="scroll-content" ref="scrollContent" :style="scrollStyle" @scroll.passive="onScroll">
           <h2 class="chapter-name">{{ chapter?.title }}</h2>
           <div class="chapter-text" ref="chapterText" @mouseup="onTextSelect" @touchend="onTextSelectTouch">
             {{ chapter?.content }}
@@ -42,7 +47,7 @@
         </article>
         <!-- 滚动进度条 -->
         <div class="scroll-progress" @click="onProgressClick">
-          <div class="scroll-progress-bar" :style="{ width: scrollPercent + '%' }"></div>
+          <div class="scroll-progress-bar" :style="{ height: scrollPercent + '%' }"></div>
         </div>
       </template>
     </main>
@@ -187,9 +192,9 @@
           <p>{{ premiumMessage }}</p>
           <div class="premium-actions">
             <button class="premium-btn secondary" @click="goToPayment">订阅VIP</button>
-            <button class="premium-btn primary" v-if="showPurchaseBtn" @click="purchaseChapter">单章购买 ¥{{ chapterPrice }}</button>
+            <button class="premium-btn primary" v-if="showPurchaseBtn" @click="purchaseChapter" :disabled="purchasing">单章购买 ¥{{ chapterPrice }}</button>
           </div>
-          <button class="premium-close" @click="showPremiumModal = false">稍后再说</button>
+          <button class="premium-close" @click="goBack">返回目录</button>
         </div>
       </div>
     </transition>
@@ -198,7 +203,8 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute, useRouter, onBeforeRouteLeave, onBeforeRouteUpdate } from 'vue-router'
+import { paginateText, pageForPosition, createReadingClock } from '../utils/reading'
 import api from '../api'
 
 // ==================== 状态 ====================
@@ -208,6 +214,16 @@ const workId = route.params.workId
 const chapterId = route.params.chapterId
 
 const chapter = ref(null)
+const loading = ref(true)
+const loadError = ref('')
+const purchasing = ref(false)
+const pageContainer = ref(null)
+const pageText = ref(null)
+const scrollContent = ref(null)
+let disposed = false
+let resizeObserver = null
+let resizeFrame = null
+let savedProgress = 0
 const chapters = ref([])
 const workTitle = ref('')
 const showHeader = ref(true)
@@ -221,11 +237,11 @@ const chapterPrice = ref(0)
 const showMenu = ref(false)
 
 // 阅读模式
-const readingMode = ref(localStorage.getItem('novel_reading_mode') || 'scroll')
+const readingMode = ref(localStorage.getItem('novel_reading_mode') === 'pagination' ? 'pagination' : 'scroll')
 
 // 阅读设置
-const fontSize = ref(parseInt(localStorage.getItem('novel_font_size') || '18'))
-const lineHeight = ref(parseFloat(localStorage.getItem('novel_line_height') || '2'))
+const fontSize = ref(Math.max(12, Math.min(36, parseInt(localStorage.getItem('novel_font_size')) || 18)))
+const lineHeight = ref(Math.max(1.2, Math.min(3.5, parseFloat(localStorage.getItem('novel_line_height')) || 2)))
 const fontFamily = ref(localStorage.getItem('novel_font_family') || "'PingFang SC','Microsoft YaHei',sans-serif")
 const theme = ref(localStorage.getItem('novel_theme') || 'dark')
 const brightness = ref(parseInt(localStorage.getItem('novel_brightness') || '100'))
@@ -269,8 +285,10 @@ const userIsVip = ref(false)
 
 // 阅读心跳
 let heartbeatInterval = null
-let readingStartTime = Date.now()
-let totalCharsRead = 0
+let readingClock = createReadingClock()
+let acknowledgedChars = 0
+let furthestChars = 0
+let heartbeatPending = null
 
 // 触摸手势
 const touchStartX = ref(0)
@@ -308,7 +326,7 @@ const scrollStyle = computed(() => ({
 
 const progressPercent = computed(() => {
   if (readingMode.value === 'pagination') {
-    return totalPages.value > 0 ? Math.round((currentPage.value / totalPages.value) * 100) : 0
+    return chapter.value?.content?.length ? Math.min(100, Math.floor((pageContents.value[currentPage.value]?.end || 0) / chapter.value.content.length * 100)) : 0
   }
   return Math.round(scrollPercent.value)
 })
@@ -324,7 +342,7 @@ const nextChapterId = computed(() => {
 })
 
 const currentPageContent = computed(() => {
-  return pageContents.value[currentPage.value] || ''
+  return pageContents.value[currentPage.value]?.text || ''
 })
 
 // ==================== 方法 ====================
@@ -341,26 +359,52 @@ function adjustLineHeight(delta) {
 }
 
 // 翻页
-function splitIntoPages(text) {
-  if (!text) return ['']
-  const maxChars = 800
-  const pages = []
-  let remaining = text
-  while (remaining.length > 0) {
-    let cut = Math.min(maxChars, remaining.length)
-    // 尝试在段落处断开
-    if (cut < remaining.length) {
-      const paragraphBreak = remaining.lastIndexOf('\n\n', cut)
-      const sentenceBreak = remaining.lastIndexOf('。', cut)
-      const breakAt = Math.max(paragraphBreak, sentenceBreak)
-      if (breakAt > cut * 0.5) {
-        cut = breakAt + 1
-      }
+async function layoutPages(position = savedProgress) {
+  await nextTick()
+  if (disposed || !chapter.value) return
+  if (readingMode.value === 'scroll') {
+    const el = scrollContent.value
+    if (el) {
+      el.scrollTop = Math.max(0, el.scrollHeight - el.clientHeight) * position / 100
+      onScroll()
     }
-    pages.push(remaining.substring(0, cut).replace(/\n/g, '<br>'))
-    remaining = remaining.substring(cut)
+    return
   }
-  return pages
+  const container = pageContainer.value
+  const content = pageText.value
+  if (!container || !content) return
+  const box = getComputedStyle(container)
+  const availableHeight = container.clientHeight - parseFloat(box.paddingTop) - parseFloat(box.paddingBottom)
+  const width = container.clientWidth - parseFloat(box.paddingLeft) - parseFloat(box.paddingRight)
+  const style = getComputedStyle(content)
+  const measure = document.createElement('div')
+  Object.assign(measure.style, {
+    position: 'fixed', visibility: 'hidden', pointerEvents: 'none', top: '0', left: '-10000px',
+    width: width + 'px', fontFamily: style.fontFamily, fontSize: style.fontSize,
+    lineHeight: style.lineHeight, fontWeight: style.fontWeight, letterSpacing: style.letterSpacing,
+    whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', textIndent: style.textIndent,
+  })
+  document.body.appendChild(measure)
+  try {
+    pageContents.value = paginateText(chapter.value.content || '', text => {
+      measure.textContent = text
+      return measure.getBoundingClientRect().height <= Math.max(1, availableHeight - 1)
+    })
+    totalPages.value = pageContents.value.length
+    currentPage.value = pageForPosition(pageContents.value, (chapter.value.content || '').length * position / 100)
+  } finally { measure.remove() }
+}
+
+function scheduleLayout() {
+  if (resizeFrame) cancelAnimationFrame(resizeFrame)
+  const position = layoutAnchor()
+  resizeFrame = requestAnimationFrame(() => { void layoutPages(position) })
+}
+
+function layoutAnchor(mode = readingMode.value) {
+  if (mode === 'scroll') return scrollPercent.value
+  const length = chapter.value?.content?.length || 1
+  return ((pageContents.value[currentPage.value]?.start || 0) + 0.01) / length * 100
 }
 
 function goPrevPage() {
@@ -382,6 +426,7 @@ function goNextPage() {
 // 划线功能
 function onTextSelect(e) {
   const selection = window.getSelection()
+  if (!selection?.rangeCount) return
   const text = selection.toString().trim()
   if (text.length > 2 && text.length < 200) {
     selectedText.value = text
@@ -431,6 +476,7 @@ async function addHighlight(color) {
 }
 
 function startAddNote() {
+  editingHighlightId.value = null
   showHighlightTooltip.value = false
   noteContent.value = ''
   showNoteModal.value = true
@@ -439,14 +485,17 @@ function startAddNote() {
 async function saveNote() {
   if (!selectedText.value) return
   try {
-    await api.post('/highlights', {
-      chapter_id: parseInt(chapterId),
-      content: selectedText.value,
-      color: currentHighlightColor.value,
-      note: noteContent.value,
-      location_start: 0,
-      location_end: 0
-    })
+    if (editingHighlightId.value) {
+      await api.put(`/highlights/${editingHighlightId.value}`, { note: noteContent.value })
+      editingHighlightId.value = null
+    } else {
+      const start = Math.max(0, (chapter.value?.content || '').indexOf(selectedText.value))
+      await api.post('/highlights', {
+        chapter_id: parseInt(chapterId), content: selectedText.value,
+        color: currentHighlightColor.value, note: noteContent.value,
+        location_start: start, location_end: start + selectedText.value.length
+      }, { params: { work_id: parseInt(workId) } })
+    }
     await loadHighlights()
     showNoteModal.value = false
     selectedText.value = ''
@@ -521,14 +570,22 @@ function goToPayment() {
 }
 
 async function purchaseChapter() {
-  // TODO: implement single chapter purchase
+  if (purchasing.value) return
+  purchasing.value = true
+  try {
+    await api.post('/payment/chapter/purchase', null, { params: { work_id: workId, chapter_id: chapterId } })
+    showPremiumModal.value = false
+    await loadReader()
+  } catch (error) {
+    premiumMessage.value = error.response?.data?.detail || '购买失败，请稍后重试。'
+  } finally { purchasing.value = false }
 }
 
 // 滚动进度
 function onProgressClick(e) {
   const rect = e.currentTarget.getBoundingClientRect()
-  const percent = ((e.clientX - rect.left) / rect.width) * 100
-  const mainEl = document.querySelector('.scroll-content')
+  const percent = ((e.clientY - rect.top) / rect.height) * 100
+  const mainEl = scrollContent.value
   if (mainEl) {
     mainEl.scrollTop = (mainEl.scrollHeight - mainEl.clientHeight) * (percent / 100)
   }
@@ -553,6 +610,7 @@ function onTouchEnd(e) {
 
 // 键盘快捷键
 function onKeyDown(e) {
+  if (loading.value || !chapter.value || showNoteModal.value || e.target?.closest('input, textarea, select, [contenteditable="true"]')) return
   if (e.key === 'ArrowLeft') {
     readingMode.value === 'pagination' ? goPrevPage() : goPrevChapter()
   } else if (e.key === 'ArrowRight') {
@@ -565,135 +623,162 @@ function onKeyDown(e) {
 
 // 数据加载
 async function loadChapter() {
-  try {
-    const res = await api.get(`/chapters/${chapterId}`)
-    chapter.value = res.data
-
-    // 分页
-    const text = res.data.content || ''
-    pageContents.value = splitIntoPages(text)
-    totalPages.value = pageContents.value.length
-    currentPage.value = 0
-
-    // 重置阅读计时
-    readingStartTime = Date.now()
-    totalCharsRead = text.length
-  } catch (e) {
-    if (e.response?.status === 403 || e.response?.status === 402) {
-      showPremiumModal.value = true
-      premiumTitle.value = e.response.status === 403 ? 'VIP专属章节' : '付费章节'
-      premiumMessage.value = e.response.data?.detail || '需要订阅VIP或购买该章节'
-      showPurchaseBtn.value = e.response.status === 402
-    } else {
-      chapter.value = {
-        id: parseInt(chapterId),
-        title: '第一章 初入江湖',
-        content: '清晨的阳光透过窗户，洒在少年的脸上。\n\n他缓缓睁开眼睛，感受着体内涌动的力量。这是他修炼的第三年，终于突破了第一个瓶颈。\n\n"小子，该起来了。"一个苍老的声音从身后传来。\n\n少年转过身，只见师父正站在门口，手持拂尘，面带微笑。\n\n"师父！"少年连忙起身恭敬行礼。\n\n"今日为师要教你一套新的功法，乃是我派不传之秘..."\n\n...'
-      }
-      const text = chapter.value.content || ''
-      pageContents.value = splitIntoPages(text)
-      totalPages.value = pageContents.value.length
-      currentPage.value = 0
-    }
-  }
+  const res = await api.get(`/chapters/${chapterId}`)
+  if (disposed) return
+  if (res.data.work_id !== Number(workId)) throw new Error('章节不属于当前作品')
+  chapter.value = res.data
 }
 
 async function loadChapters() {
+  const res = await api.get('/chapters', { params: { work_id: workId } })
+  chapters.value = res.data.chapters
+  chapterPrice.value = chapters.value.find(ch => ch.id === Number(chapterId))?.chapter_price || 0
+}
+
+async function loadReader() {
+  loading.value = true
+  loadError.value = ''
+  chapter.value = null
+  showPremiumModal.value = false
+  stopHeartbeat()
   try {
-    const res = await api.get('/chapters', { params: { work_id: workId } })
-    chapters.value = res.data?.chapters || []
-  } catch (e) {
-    chapters.value = [
-      { id: 1, title: '第一章 初入江湖' },
-      { id: 2, title: '第二章 奇遇' },
-      { id: 3, title: '第三章 修炼' },
-    ]
+    // Load the directory first so the paywall always has the actual price.
+    await loadChapters()
+    await loadChapter()
+    if (disposed) return
+    try {
+      const { data } = await api.get(`/bookshelf/progress/${workId}`)
+      savedProgress = data.chapter_id === Number(chapterId) ? data.progress : 0
+    } catch { savedProgress = 0 }
+    acknowledgedChars = Math.floor((chapter.value.content || '').length * savedProgress / 100)
+    furthestChars = acknowledgedChars
+    readingClock = createReadingClock()
+  } catch (error) {
+    chapter.value = null
+    const status = error.response?.status
+    if (status === 402 || status === 403) {
+      showPremiumModal.value = true
+      premiumTitle.value = status === 403 ? 'VIP专属章节' : '付费章节'
+      premiumMessage.value = error.response.data?.detail || '请先购买或查看会员状态'
+      showPurchaseBtn.value = status === 402
+    } else {
+      loadError.value = status === 404 ? '章节不存在，请返回目录选择其他章节。' : '章节加载失败，请检查连接后重试。'
+    }
+  } finally { loading.value = false }
+  if (chapter.value && !disposed) {
+    await layoutPages(savedProgress)
+    observeLayout()
+    startHeartbeat()
+    void loadHighlights()
   }
 }
 
 async function loadWorkInfo() {
-  try {
-    const res = await api.get(`/works/${workId}`)
-    workTitle.value = res.data?.title || ''
-  } catch (e) {
-    workTitle.value = '作品'
-  }
+  try { workTitle.value = (await api.get(`/works/${workId}`)).data.title } catch { workTitle.value = '作品' }
 }
 
-// 阅读心跳
+// Only visible, successfully loaded content contributes active reading time.
+function tickReading() {
+  readingClock.tick(document.visibilityState === 'visible' && !!chapter.value && !loading.value && !showPremiumModal.value)
+  if (chapter.value) furthestChars = Math.max(furthestChars, Math.floor((chapter.value.content || '').length * progressPercent.value / 100))
+}
+
 function startHeartbeat() {
-  heartbeatInterval = setInterval(async () => {
-    const elapsed = Math.floor((Date.now() - readingStartTime) / 1000)
-    if (elapsed < 5) return
-    try {
-      await api.post('/reading/heartbeat', {
-        work_id: parseInt(workId),
-        chapter_id: parseInt(chapterId),
-        duration_seconds: elapsed,
-        chars_read: totalCharsRead
-      })
-      readingStartTime = Date.now()
-    } catch (e) {
-      // 静默失败
-    }
-  }, 30000)
+  stopHeartbeat()
+  heartbeatInterval = setInterval(() => {
+    tickReading()
+    if (readingClock.pending() >= 30) void flushHeartbeat()
+  }, 1000)
+}
+
+function flushHeartbeat(keepalive = false) {
+  if (!chapter.value || loading.value) return Promise.resolve()
+  if (heartbeatPending) return heartbeatPending
+  tickReading()
+  const seconds = readingClock.pending()
+  const submittedChars = furthestChars
+  const payload = {
+    work_id: Number(workId), chapter_id: Number(chapterId), duration_seconds: seconds,
+    chars_read: Math.max(0, Math.min(100000, submittedChars - acknowledgedChars)), progress: progressPercent.value
+  }
+  const request = keepalive
+    ? fetch('/api/reading/heartbeat', {
+        method: 'POST', keepalive: true,
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` },
+        body: JSON.stringify(payload)
+      }).then(response => { if (!response.ok) throw new Error('进度保存失败') })
+    : api.post('/reading/heartbeat', payload, { timeout: 2000 })
+  heartbeatPending = request.then(() => {
+    readingClock.acknowledge(seconds)
+    acknowledgedChars = submittedChars
+  }).catch(() => {}).finally(() => { heartbeatPending = null })
+  return heartbeatPending
 }
 
 function stopHeartbeat() {
-  if (heartbeatInterval) {
-    clearInterval(heartbeatInterval)
-    heartbeatInterval = null
-  }
+  if (heartbeatInterval) clearInterval(heartbeatInterval)
+  heartbeatInterval = null
+}
+
+function onVisibilityChange() {
+  // Reset the clock edge before a hidden interval can be counted on return.
+  readingClock.tick(false)
+  if (document.visibilityState === 'hidden') void flushHeartbeat(true)
+}
+function onPageHide() { void flushHeartbeat(true) }
+function observeLayout() {
+  resizeObserver?.disconnect()
+  if (pageContainer.value) resizeObserver?.observe(pageContainer.value)
 }
 
 // 监听滚动
 function onScroll() {
-  const mainEl = document.querySelector('.scroll-content')
+  const mainEl = scrollContent.value
   if (mainEl) {
     const scrollTop = mainEl.scrollTop
     const scrollHeight = mainEl.scrollHeight - mainEl.clientHeight
-    scrollPercent.value = scrollHeight > 0 ? Math.round((scrollTop / scrollHeight) * 100) : 0
+    scrollPercent.value = scrollHeight > 0 ? Math.round((scrollTop / scrollHeight) * 100) : 100
   }
 }
 
-// 监听设置变化
-watch(readingMode, (val) => {
+watch(readingMode, async (val, old) => {
+  const position = layoutAnchor(old)
   localStorage.setItem('novel_reading_mode', val)
+  await layoutPages(position)
+  observeLayout()
 })
+watch(progressPercent, val => { savedProgress = val })
+watch([fontSize, lineHeight, fontFamily], () => { void layoutPages(layoutAnchor()) })
+watch(theme, val => localStorage.setItem('novel_theme', val))
+watch(fontFamily, val => localStorage.setItem('novel_font_family', val))
+watch(brightness, val => localStorage.setItem('novel_brightness', val))
 
-watch(theme, (val) => {
-  localStorage.setItem('novel_theme', val)
-})
-
-watch(fontFamily, (val) => {
-  localStorage.setItem('novel_font_family', val)
-})
-
-// ==================== 生命周期 ====================
-onMounted(async () => {
-  await Promise.all([
-    loadChapter(),
-    loadChapters(),
-    loadWorkInfo(),
-    loadHighlights()
-  ])
-
+onBeforeRouteLeave(() => flushHeartbeat())
+onBeforeRouteUpdate(() => flushHeartbeat())
+onMounted(() => {
+  resizeObserver = new ResizeObserver(scheduleLayout)
   document.addEventListener('keydown', onKeyDown)
-  document.querySelector('.scroll-content')?.addEventListener('scroll', onScroll)
-
-  startHeartbeat()
+  document.addEventListener('visibilitychange', onVisibilityChange)
+  window.addEventListener('pagehide', onPageHide)
+  window.addEventListener('resize', scheduleLayout)
+  void loadWorkInfo()
+  void loadReader()
 })
-
 onUnmounted(() => {
+  disposed = true
   stopHeartbeat()
+  resizeObserver?.disconnect()
+  if (resizeFrame) cancelAnimationFrame(resizeFrame)
   document.removeEventListener('keydown', onKeyDown)
-  document.querySelector('.scroll-content')?.removeEventListener('scroll', onScroll)
+  document.removeEventListener('visibilitychange', onVisibilityChange)
+  window.removeEventListener('pagehide', onPageHide)
+  window.removeEventListener('resize', scheduleLayout)
 })
 </script>
 
 <style scoped>
 .reader-page {
-  min-height: 100vh;
+  height: 100dvh;
   position: relative;
   overflow: hidden;
   user-select: none;
@@ -772,7 +857,7 @@ onUnmounted(() => {
 
 /* Main Content */
 .reader-main {
-  min-height: 100vh;
+  height: 100dvh;
   padding-top: 56px;
   padding-bottom: 60px;
   position: relative;
@@ -782,14 +867,16 @@ onUnmounted(() => {
 .page-container {
   max-width: 800px;
   margin: 0 auto;
-  padding: 40px 32px;
-  min-height: calc(100vh - 116px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  padding: 24px 20px;
+  height: 100%;
+  overflow: hidden;
 }
 
 .page-content {
+  width: 100%;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
   max-width: 100%;
   line-height: var(--line-height, 2);
   text-indent: 2em;
@@ -833,6 +920,8 @@ onUnmounted(() => {
 
 /* Scroll Mode */
 .scroll-content {
+  height: 100%;
+  overflow-y: auto;
   max-width: 800px;
   margin: 0 auto;
   padding: 32px 24px 120px;
@@ -867,14 +956,15 @@ onUnmounted(() => {
 }
 
 .scroll-progress-bar {
-  width: 0%;
-  height: 100%;
+  width: 100%;
+  height: 0%;
   background: var(--accent);
-  transition: width 0.3s;
+  transition: height 0.3s;
   opacity: 0.5;
 }
 
 .scroll-progress:hover .scroll-progress-bar {
+  width: 100%;
   opacity: 1;
 }
 
@@ -1393,4 +1483,6 @@ onUnmounted(() => {
     padding: 24px 16px;
   }
 }
+.reader-status { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; justify-content: center; height: 100%; padding: 24px; }
+.reader-status button { padding: 10px 16px; background: var(--section-bg); color: inherit; border: 1px solid var(--accent); border-radius: 8px; }
 </style>

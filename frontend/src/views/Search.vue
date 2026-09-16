@@ -17,19 +17,21 @@
     </header>
     <div class="container">
       <div class="result-info" v-if="hasSearched">
-        <span>找到 {{ results.length }} 个结果</span>
+        <span>找到 {{ total }} 个结果</span>
         <div class="sort-options">
           <button :class="{ active: sortBy === 'relevance' }" @click="sortBy = 'relevance'; doSearch()">相关度</button>
           <button :class="{ active: sortBy === 'clicks' }" @click="sortBy = 'clicks'; doSearch()">人气</button>
           <button :class="{ active: sortBy === 'updated_at' }" @click="sortBy = 'updated_at'; doSearch()">最近更新</button>
         </div>
       </div>
-      <div class="results-list" v-if="hasSearched">
+      <p v-if="loading" role="status">搜索中...</p>
+      <div v-else-if="errorMessage" role="alert">{{ errorMessage }} <button @click="doSearch">重试</button></div>
+      <div class="results-list" v-else-if="hasSearched">
         <div class="result-item" v-for="r in results" :key="r.id" @click="$router.push(`/works/${r.id}`)">
           <div class="result-cover" :style="{ background: getGradient(r.id) }"></div>
-          <div class="result-info">
-            <h3 v-html="highlightText(r.title)"></h3>
-            <p class="author" v-html="highlightText(r.author)"></p>
+          <div class="book-result-info">
+            <h3><HighlightedText :text="r.title" :keyword="submittedKeyword" /></h3>
+            <p class="author"><HighlightedText :text="r.author" :keyword="submittedKeyword" /></p>
             <p class="desc">{{ r.description?.slice(0, 80) }}...</p>
             <div class="meta">
               <span>{{ r.category }}</span>
@@ -42,7 +44,12 @@
           <p class="hint">试试其他关键词</p>
         </div>
       </div>
-      <div class="hot-searches" v-else>
+      <div class="pagination" v-if="hasSearched && !loading && !errorMessage && total > pageSize">
+        <button :disabled="page <= 1" @click="searchPage(page - 1)">上一页</button>
+        <span>{{ page }} / {{ Math.ceil(total / pageSize) }}</span>
+        <button :disabled="page * pageSize >= total" @click="searchPage(page + 1)">下一页</button>
+      </div>
+      <div class="hot-searches" v-if="!hasSearched">
         <h3>🔥 热门搜索</h3>
         <div class="hot-tags">
           <span class="hot-tag" v-for="(tag, idx) in hotTags" :key="tag" @click="keyword = tag; doSearch()">
@@ -56,41 +63,49 @@
 <script setup>
 import { ref, onMounted, nextTick } from 'vue'
 import api from '../api'
+import HighlightedText from '../components/HighlightedText.vue'
 const keyword = ref('')
+const submittedKeyword = ref('')
 const results = ref([])
 const suggestions = ref([])
 const hasSearched = ref(false)
 const sortBy = ref('relevance')
 const searchInput = ref(null)
+const loading = ref(false)
+const errorMessage = ref('')
+const total = ref(0)
+const page = ref(1)
+const pageSize = 20
+let requestId = 0
 const hotTags = ['玄幻', '仙侠', '都市', '科幻', '言情', '穿越', '系统', '重生']
-const hotKeywords = ['苍穹之上', '九天神帝', '末世手记', '长安夜雨']
-
-const getGradient = (id) => {
-  const g = ['linear-gradient(135deg,#1a1e2e,#0f1118)','linear-gradient(135deg,#2d1f3d,#14101f)','linear-gradient(135deg,#1f2d30,#0f1414)']
-  return g[(id||0)%g.length]
-}
-const highlightText = (text) => {
-  if (!text || !keyword.value) return text
-  const re = new RegExp(`(${keyword.value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi')
-  return text.replace(re, '<mark style="background:rgba(201,169,110,0.3);color:#c9a96e;padding:0 2px">$1</mark>')
-}
-const onInput = () => {
-  if (keyword.value.length > 1) {
-    suggestions.value = hotKeywords.filter(k => k.includes(keyword.value))
-  } else {
-    suggestions.value = []
+const getGradient = (id) => ['linear-gradient(135deg,#1a1e2e,#0f1118)','linear-gradient(135deg,#2d1f3d,#14101f)'][(id || 0) % 2]
+const onInput = () => { suggestions.value = [] }
+const searchPage = async (targetPage = 1) => {
+  if (!submittedKeyword.value) return
+  const id = ++requestId
+  hasSearched.value = true
+  loading.value = true
+  errorMessage.value = ''
+  try {
+    const response = await api.get('/works/search', { params: {
+      q: submittedKeyword.value, sort: sortBy.value, page: targetPage, page_size: pageSize
+    } })
+    if (id !== requestId) return
+    results.value = response.data.works
+    total.value = response.data.total
+    page.value = targetPage
+  } catch (error) {
+    if (id === requestId) errorMessage.value = '搜索失败，请检查连接后重试。'
+  } finally {
+    if (id === requestId) loading.value = false
   }
 }
-const doSearch = async () => {
-  if (!keyword.value.trim()) return
-  hasSearched.value = true
+const doSearch = () => {
+  submittedKeyword.value = keyword.value.trim()
   suggestions.value = []
-  try {
-    const r = await api.get('/works/search', { params: { q: keyword.value.trim(), page: 1, page_size: 20 } })
-    results.value = r.data?.works || r.data || []
-  } catch(e) { results.value = [] }
+  return searchPage(1)
 }
-onMounted(() => { nextTick(() => searchInput.value?.focus()) })
+onMounted(() => nextTick(() => searchInput.value?.focus()))
 </script>
 <style scoped>
 .search-page { min-height: 100vh; background: #0a0c10; padding-bottom: 60px; }
@@ -111,8 +126,8 @@ onMounted(() => { nextTick(() => searchInput.value?.focus()) })
 .result-item { display: flex; gap: 16px; padding: 16px; background: #12151c; border: 1px solid rgba(201,169,110,0.08); border-radius: 12px; cursor: pointer; transition: border-color 0.2s; }
 .result-item:hover { border-color: rgba(201,169,110,0.25); }
 .result-cover { width: 80px; height: 110px; border-radius: 8px; flex-shrink: 0; }
-.result-info { flex: 1; min-width: 0; }
-.result-info h3 { font-size: 16px; color: #e8e4dc; margin-bottom: 4px; }
+.book-result-info { flex: 1; min-width: 0; }
+.book-result-info h3 { font-size: 16px; color: #e8e4dc; margin-bottom: 4px; }
 .author { font-size: 13px; color: #8a8678; margin-bottom: 8px; }
 .desc { font-size: 13px; color: #555248; margin-bottom: 8px; line-height: 1.5; }
 .meta { display: flex; gap: 8px; font-size: 11px; }
@@ -124,4 +139,7 @@ onMounted(() => { nextTick(() => searchInput.value?.focus()) })
 .hot-tags { display: flex; flex-wrap: wrap; gap: 8px; }
 .hot-tag { padding: 8px 16px; background: #12151c; border: 1px solid rgba(201,169,110,0.08); border-radius: 20px; font-size: 13px; color: #8a8678; cursor: pointer; }
 .hot-tag:hover { border-color: rgba(201,169,110,0.25); color: #c9a96e; }
+.pagination { display: flex; gap: 16px; align-items: center; justify-content: center; padding: 24px; }
+.pagination button { padding: 8px 12px; border: 1px solid #c9a96e; border-radius: 6px; background: transparent; color: #c9a96e; }
+.pagination button:disabled { opacity: .4; }
 </style>

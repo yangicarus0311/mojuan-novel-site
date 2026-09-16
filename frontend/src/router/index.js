@@ -29,4 +29,9 @@ const router = createRouter({
   routes
 })
 
+router.beforeEach(to => {
+  const protectedPage = ['/bookshelf', '/payment', '/notebook', '/stats', '/feed', '/admin'].some(path => to.path.startsWith(path)) || to.path.includes('/chapters/')
+  if (protectedPage && !localStorage.getItem('token')) return { path: '/login', query: { redirect: to.fullPath } }
+})
+
 export default router

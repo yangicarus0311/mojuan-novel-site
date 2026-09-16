@@ -160,6 +160,17 @@ class Order(Base):
     created_at = Column(DateTime, server_default=func.now())
 
 
+class ChapterPurchase(Base):
+    __tablename__ = "chapter_purchases"
+    __table_args__ = (UniqueConstraint("user_id", "chapter_id", name="uq_chapter_purchase"),)
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    chapter_id = Column(Integer, ForeignKey("chapters.id"), nullable=False, index=True)
+    order_id = Column(Integer, ForeignKey("orders.id"), nullable=False, unique=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+
 class UserBalance(Base):
     __tablename__ = "user_balances"
 

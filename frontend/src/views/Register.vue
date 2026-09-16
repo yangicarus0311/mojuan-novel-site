@@ -22,9 +22,10 @@
 </template>
 <script setup>
 import { ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import api from '../api'
 const router = useRouter()
+const route = useRoute()
 const form = ref({ username: '', email: '', password: '' })
 const loading = ref(false)
 const error = ref('')
@@ -34,7 +35,8 @@ const handleRegister = async () => {
     const res = await api.post('/auth/register', form.value)
     localStorage.setItem('token', res.data.access_token)
     localStorage.setItem('user', JSON.stringify(res.data.user))
-    router.push('/')
+    const target = route.query.redirect
+    router.replace(typeof target === 'string' && target.startsWith('/') && !target.startsWith('//') ? target : '/')
   } catch (e) {
     error.value = e.response?.data?.detail || '注册失败'
   } finally { loading.value = false }

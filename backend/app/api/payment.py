@@ -8,7 +8,7 @@ from app.core.database import get_db
 from app.core.auth import get_current_user
 from app.models.models import (
     PaymentPlan, UserSubscription, WorkPrice, Order, UserBalance, MonthlyTicket,
-    SubscriptionStatus, OrderType, OrderStatus
+    SubscriptionStatus, OrderType, OrderStatus, User
 )
 from app.schemas.schemas import (
     PaymentPlanSchema, SubscriptionSchema, OrderSchema, 
@@ -30,28 +30,19 @@ def subscribe(
     plan_id: int,
     payment_method: str,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user)
+    current_user: User = Depends(get_current_user)
 ):
     """用户订阅VIP套餐"""
-    user_id = current_user["id"]
-    
-    try:
-        result = PaymentService.create_subscription(db, user_id, plan_id, payment_method)
-        return {
-            **result,
-            "payment_url": f"/payment/process/{result['order_no']}"  # 实际项目中这里应该是第三方支付链接
-        }
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    raise HTTPException(status_code=503, detail="会员开通暂不可用，支付服务尚未开放")
 
 
 @router.get("/subscription/status", response_model=SubscriptionStatusResponse)
 def get_subscription_status(
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user)
+    current_user: User = Depends(get_current_user)
 ):
     """获取用户订阅状态"""
-    user_id = current_user["id"]
+    user_id = current_user.id
     return PaymentService.get_user_subscription_status(db, user_id)
 
 
@@ -60,10 +51,10 @@ def purchase_chapter(
     work_id: int,
     chapter_id: int,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user)
+    current_user: User = Depends(get_current_user)
 ):
     """购买单章"""
-    user_id = current_user["id"]
+    user_id = current_user.id
     
     try:
         result = PaymentService.purchase_chapter(db, user_id, work_id, chapter_id)
@@ -77,28 +68,19 @@ def recharge_balance(
     amount: float,
     payment_method: str,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user)
+    current_user: User = Depends(get_current_user)
 ):
     """用户充值余额"""
-    user_id = current_user["id"]
-    
-    try:
-        result = PaymentService.recharge_balance(db, user_id, amount, payment_method)
-        return {
-            **result,
-            "payment_url": f"/payment/process/{result['order_no']}"
-        }
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    raise HTTPException(status_code=503, detail="充值暂不可用，支付服务尚未开放")
 
 
 @router.get("/balance", response_model=BalanceSchema)
 def get_balance(
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user)
+    current_user: User = Depends(get_current_user)
 ):
     """获取用户余额"""
-    user_id = current_user["id"]
+    user_id = current_user.id
     return PaymentService.get_user_balance(db, user_id)
 
 
@@ -107,10 +89,10 @@ def vote_monthly_ticket(
     work_id: int,
     ticket_count: int = 1,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user)
+    current_user: User = Depends(get_current_user)
 ):
     """投月票"""
-    user_id = current_user["id"]
+    user_id = current_user.id
     
     try:
         result = PaymentService.vote_monthly_ticket(db, user_id, work_id, ticket_count)
@@ -119,15 +101,6 @@ def vote_monthly_ticket(
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.post("/webhook/payment")
-def payment_webhook(
-    order_no: str,
-    status: str,
-    db: Session = Depends(get_db)
-):
-    """支付回调（实际项目中用于接收第三方支付回调）"""
-    try:
-        result = PaymentService.process_payment_success(db, order_no)
-        return result
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+@router.get("/capabilities")
+def payment_capabilities():
+    return {"external_payments_enabled": False, "message": "充值和会员开通暂未开放，已有会员与余额可继续使用。"}

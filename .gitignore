@@ -36,7 +36,11 @@ uploads/*
 
 # Dev tools
 screenshot-mojuan.js
-package.json
+/package.json
+.test-deps/
+*.log
+.local/
+.test-artifacts/
 
 # Images (keep folder, ignore large assets)
 *.png

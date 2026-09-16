@@ -1,9 +1,11 @@
 """Payment services for handling payment logic"""
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
+from fastapi import HTTPException
 from datetime import datetime, timedelta
 from app.models.models import (
     PaymentPlan, UserSubscription, WorkPrice, Order, UserBalance, MonthlyTicket,
-    SubscriptionStatus, OrderType, OrderStatus, User
+    SubscriptionStatus, OrderType, OrderStatus, User, Chapter, ChapterPurchase
 )
 from app.schemas.schemas import (
     PaymentPlanSchema, SubscriptionSchema, OrderSchema, 
@@ -30,46 +32,9 @@ class PaymentService:
         ).first()
     
     @staticmethod
-    def create_subscription(
-        db: Session, 
-        user_id: int, 
-        plan_id: int, 
-        payment_method: str
-    ) -> dict:
-        """创建订阅订单"""
-        plan = PaymentService.get_payment_plan(db, plan_id)
-        if not plan:
-            raise ValueError("套餐不存在")
-        
-        # 检查用户是否已有有效订阅
-        existing_sub = db.query(UserSubscription).filter(
-            UserSubscription.user_id == user_id,
-            UserSubscription.status == SubscriptionStatus.active,
-            UserSubscription.end_date > datetime.now()
-        ).first()
-        if existing_sub:
-            raise ValueError("您已有有效的订阅")
-        
-        # 创建订单
-        order_no = str(uuid.uuid4())
-        order = Order(
-            order_no=order_no,
-            user_id=user_id,
-            order_type=OrderType.subscription,
-            amount=plan.price,
-            payment_method=payment_method,
-            status=OrderStatus.pending
-        )
-        db.add(order)
-        db.commit()
-        db.refresh(order)
-        
-        return {
-            "order_no": order_no,
-            "amount": plan.price,
-            "payment_method": payment_method
-        }
-    
+    def create_subscription(db: Session, user_id: int, plan_id: int, payment_method: str) -> dict:
+        raise ValueError("会员开通暂不可用，支付服务尚未开放")
+
     @staticmethod
     def get_user_subscription_status(db: Session, user_id: int) -> SubscriptionStatusResponse:
         """获取用户订阅状态"""
@@ -90,75 +55,63 @@ class PaymentService:
         return SubscriptionStatusResponse(
             is_vip=True,
             expire_date=subscription.end_date,
-            plan_name=subscription.plan.name
+            plan_name=db.query(PaymentPlan).filter(PaymentPlan.id == subscription.plan_id).one().name
         )
     
     @staticmethod
-    def purchase_chapter(
-        db: Session, 
-        user_id: int, 
-        work_id: int, 
-        chapter_id: int
-    ) -> dict:
-        """购买单章"""
-        # 检查作品价格
-        work_price = db.query(WorkPrice).filter(WorkPrice.work_id == work_id).first()
-        if not work_price or work_price.chapter_price <= 0:
-            raise ValueError("该作品不支持单章购买")
-        
-        # 检查用户余额
-        user_balance = PaymentService.get_or_create_user_balance(db, user_id)
-        if user_balance.balance < work_price.chapter_price:
-            raise ValueError("余额不足，请先充值")
-        
-        # 创建订单
-        order_no = str(uuid.uuid4())
-        order = Order(
-            order_no=order_no,
-            user_id=user_id,
-            order_type=OrderType.chapter,
-            amount=work_price.chapter_price,
-            status=OrderStatus.paid,
-            payment_method="balance"
-        )
-        db.add(order)
-        
-        # 扣除余额
-        user_balance.balance -= work_price.chapter_price
-        db.commit()
-        
-        return {"success": True, "order_no": order_no}
-    
+    def purchase_chapter(db: Session, user_id: int, work_id: int, chapter_id: int) -> dict:
+        chapter = db.query(Chapter).filter(Chapter.id == chapter_id, Chapter.work_id == work_id).first()
+        if not chapter:
+            raise ValueError("章节不存在或不属于该作品")
+        existing = db.query(ChapterPurchase).filter_by(user_id=user_id, chapter_id=chapter_id).first()
+        if existing:
+            order = db.query(Order).filter_by(id=existing.order_id, status=OrderStatus.paid).first()
+            if order:
+                return {"success": True, "order_no": order.order_no, "already_purchased": True}
+            raise ValueError("该购买记录状态异常，请联系管理员")
+        if PaymentService.check_user_vip_status(db, user_id):
+            return {"success": True, "already_accessible": True}
+        price = db.query(WorkPrice).filter_by(work_id=work_id).first()
+        if price and price.is_premium:
+            raise ValueError("该章节仅限有效会员阅读")
+        if not price or price.chapter_price <= 0:
+            raise ValueError("该章节可免费阅读，无需购买")
+        # Conditional UPDATE prevents concurrent requests from overspending.
+        try:
+            changed = db.query(UserBalance).filter(
+                UserBalance.user_id == user_id, UserBalance.balance >= price.chapter_price
+            ).update({UserBalance.balance: UserBalance.balance - price.chapter_price}, synchronize_session=False)
+            if changed != 1:
+                db.rollback()
+                # A concurrent retry may have already paid for this same chapter.
+                receipt = db.query(ChapterPurchase).filter_by(user_id=user_id, chapter_id=chapter_id).first()
+                if receipt:
+                    paid_order = db.query(Order).filter_by(id=receipt.order_id, user_id=user_id, status=OrderStatus.paid).first()
+                    if paid_order:
+                        return {"success": True, "order_no": paid_order.order_no, "already_purchased": True}
+                raise ValueError("余额不足")
+            order = Order(order_no=str(uuid.uuid4()), user_id=user_id, order_type=OrderType.chapter,
+                amount=price.chapter_price, status=OrderStatus.paid, payment_method="balance", payment_time=datetime.now())
+            db.add(order)
+            db.flush()
+            db.add(ChapterPurchase(user_id=user_id, chapter_id=chapter_id, order_id=order.id))
+            order_no = order.order_no
+            db.commit()
+            return {"success": True, "order_no": order_no}
+        except IntegrityError:
+            # The unique user/chapter receipt also makes concurrent retries idempotent.
+            db.rollback()
+            receipt = db.query(ChapterPurchase).filter_by(user_id=user_id, chapter_id=chapter_id).first()
+            if receipt:
+                order = db.query(Order).filter_by(id=receipt.order_id, status=OrderStatus.paid).first()
+                if order:
+                    return {"success": True, "order_no": order.order_no, "already_purchased": True}
+            raise ValueError("购买未完成，请重试")
+
     @staticmethod
-    def recharge_balance(
-        db: Session, 
-        user_id: int, 
-        amount: float, 
-        payment_method: str
-    ) -> dict:
-        """充值余额"""
-        if amount <= 0 or amount > 10000:
-            raise ValueError("充值金额不合法")
-        
-        # 创建订单
-        order_no = str(uuid.uuid4())
-        order = Order(
-            order_no=order_no,
-            user_id=user_id,
-            order_type=OrderType.subscription,
-            amount=amount,
-            payment_method=payment_method,
-            status=OrderStatus.pending
-        )
-        db.add(order)
-        db.commit()
-        
-        return {
-            "order_no": order_no,
-            "amount": amount,
-            "payment_method": payment_method
-        }
-    
+    def recharge_balance(db: Session, user_id: int, amount: float, payment_method: str) -> dict:
+        raise ValueError("充值暂不可用，支付服务尚未开放")
+
     @staticmethod
     def get_or_create_user_balance(db: Session, user_id: int) -> UserBalance:
         """获取或创建用户余额记录"""
@@ -205,26 +158,8 @@ class PaymentService:
     
     @staticmethod
     def process_payment_success(db: Session, order_no: str):
-        """处理支付成功回调"""
-        order = db.query(Order).filter(Order.order_no == order_no).first()
-        if not order:
-            raise ValueError("订单不存在")
-        
-        if order.status == OrderStatus.paid:
-            return {"success": True}  # 已经处理过
-        
-        order.status = OrderStatus.paid
-        order.payment_time = datetime.now()
-        
-        # 处理订单业务逻辑
-        if order.order_type == OrderType.subscription:
-            # 处理订阅
-            # 这里需要找到对应的套餐信息（简化处理）
-            pass
-        
-        db.commit()
-        return {"success": True}
-    
+        raise ValueError("未配置可信支付渠道，禁止修改订单支付状态")
+
     @staticmethod
     def check_user_vip_status(db: Session, user_id: int) -> bool:
         """检查用户是否为VIP"""
@@ -237,33 +172,29 @@ class PaymentService:
         return subscription is not None
     
     @staticmethod
-    def check_chapter_access(
-        db: Session, 
-        user_id: int, 
-        work_id: int, 
-        chapter_id: int
-    ) -> bool:
-        """检查用户是否有权限访问章节"""
-        # 检查是否为VIP专属章节
-        work_price = db.query(WorkPrice).filter(WorkPrice.work_id == work_id).first()
-        if work_price and work_price.is_premium:
-            # 需要VIP权限
-            is_vip = PaymentService.check_user_vip_status(db, user_id)
-            if not is_vip:
-                return False
-        
-        # 检查是否为付费章节
-        if work_price and work_price.chapter_price > 0:
-            # 检查用户是否已购买
-            order = db.query(Order).filter(
-                Order.user_id == user_id,
-                Order.order_type == OrderType.chapter,
-                Order.status == OrderStatus.paid
-            ).first()
-            if not order:
-                # 检查用户余额是否足够
-                user_balance = PaymentService.get_user_balance(db, user_id)
-                if user_balance.balance < work_price.chapter_price:
-                    return False
-        
-        return True
+    def check_chapter_access(db: Session, user_id: int, work_id: int, chapter_id: int) -> bool:
+        if not db.query(Chapter.id).filter_by(id=chapter_id, work_id=work_id).first():
+            return False
+        if PaymentService.check_user_vip_status(db, user_id):
+            return True
+        price = db.query(WorkPrice).filter_by(work_id=work_id).first()
+        if not price:
+            return True
+        if price.is_premium:
+            return False
+        if price.chapter_price <= 0:
+            return True
+        return db.query(ChapterPurchase).join(Order, Order.id == ChapterPurchase.order_id).filter(
+            ChapterPurchase.user_id == user_id, ChapterPurchase.chapter_id == chapter_id,
+            Order.user_id == user_id, Order.status == OrderStatus.paid,
+            Order.order_type == OrderType.chapter
+        ).first() is not None
+
+    @staticmethod
+    def require_chapter_access(db: Session, user_id: int, chapter: Chapter):
+        if PaymentService.check_chapter_access(db, user_id, chapter.work_id, chapter.id):
+            return
+        price = db.query(WorkPrice).filter_by(work_id=chapter.work_id).first()
+        if price and price.is_premium:
+            raise HTTPException(status_code=403, detail="该章节需要有效的 VIP 会员")
+        raise HTTPException(status_code=402, detail="请先购买该章节")

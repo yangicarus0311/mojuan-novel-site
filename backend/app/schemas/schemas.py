@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 from typing import Optional, List
 from datetime import datetime
 from app.models.models import WorkStatus
@@ -90,9 +90,24 @@ class ChapterResponse(ChapterBase):
         from_attributes = True
 
 
+class ChapterSummary(BaseModel):
+    id: int
+    work_id: int
+    volume_id: int
+    chapter_number: int
+    title: str
+    word_count: int
+    created_at: datetime
+    is_vip: bool = False
+    chapter_price: float = 0
+
+    class Config:
+        from_attributes = True
+
+
 class ChapterListResponse(BaseModel):
     total: int
-    chapters: List[ChapterResponse]
+    chapters: List[ChapterSummary]
 
 
 # Bookshelf schemas
@@ -111,8 +126,8 @@ class BookshelfResponse(BaseModel):
 
 # Read Progress schemas
 class ReadProgressUpdate(BaseModel):
-    chapter_id: int
-    progress: int = 0
+    chapter_id: int = Field(gt=0)
+    progress: int = Field(default=0, ge=0, le=100)
 
 
 class ReadProgressResponse(BaseModel):
@@ -273,10 +288,11 @@ class HighlightResponse(BaseModel):
 
 
 class ReadingSessionHeartbeat(BaseModel):
-    work_id: int
-    chapter_id: int
-    duration_seconds: int
-    chars_read: int
+    work_id: int = Field(gt=0)
+    chapter_id: int = Field(gt=0)
+    duration_seconds: int = Field(ge=0, le=60)
+    chars_read: int = Field(ge=0, le=100000)
+    progress: int = Field(default=0, ge=0, le=100)
 
 
 class DailyStatsResponse(BaseModel):

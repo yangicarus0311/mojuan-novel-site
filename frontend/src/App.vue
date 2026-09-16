@@ -1,6 +1,6 @@
 <template>
   <div id="app-root">
-    <router-view />
+    <router-view :key="$route.path" />
     <!-- 底部导航 (仅主页面显示) -->
     <nav class="bottom-nav" v-if="showBottomNav">
       <router-link to="/" class="nav-item" :class="{ active: $route.path === '/' }">

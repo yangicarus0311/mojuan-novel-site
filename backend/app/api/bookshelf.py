@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-from app.models.models import Bookshelf, Work, ReadProgress
+from app.models.models import Bookshelf, Work, ReadProgress, Chapter
 from app.schemas.schemas import BookshelfResponse, ReadProgressResponse, ReadProgressUpdate
 from app.core.database import get_db
 from app.api.auth import get_current_user
@@ -96,11 +96,16 @@ def update_read_progress(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+    chapter = db.query(Chapter).filter(Chapter.id == progress_data.chapter_id, Chapter.work_id == work_id).first()
+    if not chapter:
+        raise HTTPException(status_code=404, detail="章节不存在或不属于该作品")
+    from app.services.payment_service import PaymentService
+    PaymentService.require_chapter_access(db, current_user.id, chapter)
     progress = db.query(ReadProgress).filter(
         ReadProgress.user_id == current_user.id,
         ReadProgress.work_id == work_id
     ).first()
-    
+
     if progress:
         progress.chapter_id = progress_data.chapter_id
         progress.progress = progress_data.progress

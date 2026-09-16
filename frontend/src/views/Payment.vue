@@ -7,6 +7,10 @@
       </div>
     </header>
     <div class="container">
+      <p v-if="loading" role="status" class="payment-message">正在加载会员信息...</p>
+      <p v-if="serviceMessage" class="payment-message">{{ serviceMessage }}</p>
+      <p v-if="statusMessage" role="status" class="payment-message">{{ statusMessage }}</p>
+      <p v-if="errorMessage" role="alert" class="payment-message">{{ errorMessage }} <button @click="loadData">重试</button></p>
       <!-- 用户状态 -->
       <div class="status-card">
         <div class="status-left">
@@ -24,7 +28,7 @@
         <div class="balance-box">
           <span class="balance-label">余额</span>
           <span class="balance-amount">¥{{ balance.toFixed(2) }}</span>
-          <button class="recharge-btn" @click="showRecharge = true">充值</button>
+          <button class="recharge-btn" @click="showRecharge = true" :disabled="!paymentsEnabled || loading">{{ paymentsEnabled ? '充值' : '充值暂未开放' }}</button>
         </div>
       </div>
 
@@ -40,13 +44,11 @@
             <p class="plan-desc">{{ plan.description }}</p>
             <ul class="plan-benefits">
               <li>✓ VIP章节免费阅读</li>
-              <li>✓ 无广告体验</li>
-              <li>✓ 专属月票</li>
-              <li v-if="plan.duration_days >= 90">✓ 专属头像框</li>
+              <li>✓ 阅读进度同步</li>
             </ul>
             <button class="subscribe-btn" :class="{ active: selectedPlan === plan.id }"
-              @click.stop="subscribe" :disabled="!selectedPlan">
-              立即开通
+              @click.stop="subscribe(plan.id)" :disabled="!paymentsEnabled || busy || loading">
+              {{ paymentsEnabled ? '立即开通' : '暂未开放' }}
             </button>
           </div>
         </div>
@@ -80,35 +82,47 @@ const balance = ref(0)
 const userName = ref('')
 const showRecharge = ref(false)
 const rechargeAmount = ref(50)
+const paymentsEnabled = ref(false)
+const loading = ref(false)
+const busy = ref(false)
+const serviceMessage = ref('')
+const errorMessage = ref('')
+const statusMessage = ref('')
 const formatDate = (d) => d ? new Date(d).toLocaleDateString('zh-CN') : ''
-const subscribe = async () => {
-  if (!selectedPlan.value) return
-  try {
-    await api.post('/payment/subscribe', null, { params: { plan_id: selectedPlan.value, payment_method: 'alipay' } })
-    alert('订阅成功！')
-    const r = await api.get('/payment/subscription/status')
-    subscriptionStatus.value = r.data
-  } catch(e) { alert('订阅失败: ' + (e.response?.data?.detail || e.message)) }
+async function loadData() {
+  loading.value = true
+  errorMessage.value = ''
+  const results = await Promise.allSettled([
+    api.get('/payment/plans'), api.get('/payment/subscription/status'),
+    api.get('/payment/balance'), api.get('/payment/capabilities')
+  ])
+  if (results[0].status === 'fulfilled') plans.value = results[0].value.data
+  if (results[1].status === 'fulfilled') subscriptionStatus.value = results[1].value.data
+  if (results[2].status === 'fulfilled') balance.value = results[2].value.data.balance
+  if (results[3].status === 'fulfilled') {
+    paymentsEnabled.value = results[3].value.data.external_payments_enabled
+    serviceMessage.value = results[3].value.data.message
+  }
+  if (results.some(result => result.status === 'rejected')) errorMessage.value = '部分会员信息加载失败，请重试。'
+  loading.value = false
 }
-const doRecharge = async () => {
+async function checkout(path, params) {
+  if (!paymentsEnabled.value || busy.value) return
+  busy.value = true
+  errorMessage.value = ''
   try {
-    await api.post('/payment/recharge', null, { params: { amount: rechargeAmount.value, payment_method: 'alipay' } })
-    alert('充值成功！'); showRecharge.value = false
-    const r = await api.get('/payment/balance')
-    balance.value = r.data.balance
-  } catch(e) { alert('充值失败: ' + (e.message)) }
+    const { data } = await api.post(path, null, { params })
+    statusMessage.value = data.status === 'paid' ? '支付已确认。' : '订单已创建，等待支付确认。'
+    showRecharge.value = false
+    await loadData()
+  } catch (error) { errorMessage.value = error.response?.data?.detail || '提交失败，请稍后重试。' }
+  finally { busy.value = false }
 }
-onMounted(async () => {
-  const u = localStorage.getItem('user')
-  if (u) userName.value = JSON.parse(u).username
-  try {
-    const [p, s, b] = await Promise.all([
-      api.get('/payment/plans'),
-      api.get('/payment/subscription/status'),
-      api.get('/payment/balance')
-    ])
-    plans.value = p.data; subscriptionStatus.value = s.data; balance.value = b.data.balance
-  } catch(e) {}
+const subscribe = planId => checkout('/payment/subscribe', { plan_id: planId, payment_method: 'alipay' })
+const doRecharge = () => checkout('/payment/recharge', { amount: rechargeAmount.value, payment_method: 'alipay' })
+onMounted(() => {
+  try { userName.value = JSON.parse(localStorage.getItem('user') || '{}').username || '' } catch {}
+  void loadData()
 })
 </script>
 <style scoped>
@@ -154,4 +168,6 @@ h2 { font-size: 18px; color: #e8e4dc; margin-bottom: 16px; }
 .modal-actions button { flex: 1; padding: 12px; border-radius: 8px; font-size: 14px; cursor: pointer; }
 .cancel { background: transparent; border: 1px solid rgba(201,169,110,0.15); color: #8a8678; }
 .confirm { background: #c9a96e; border: none; color: #0a0c10; font-weight: 600; }
+.payment-message { padding: 14px 0; color: #c9bfae; line-height: 1.6; }
+.recharge-btn:disabled { opacity: .55; cursor: not-allowed; }
 </style>

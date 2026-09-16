@@ -1,9 +1,9 @@
 from sqlalchemy.orm import Session
-from sqlalchemy import desc, asc, or_, func
+from sqlalchemy import desc, asc, or_, func, case
 from app.models.models import Work, WorkStatus, User
 from app.schemas.schemas import WorkResponse, WorkListResponse, WorkCreate
 from app.core.database import get_db
-from app.api.auth import get_current_user
+from app.core.auth import require_admin
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 
 router = APIRouter(prefix="/works", tags=["作品"])
@@ -62,6 +62,38 @@ def get_rankings(
     return [{"rank": i+1, "work": WorkResponse.model_validate(w)} for i, w in enumerate(works)]
 
 
+@router.get("/search")
+def search_works(
+    q: str = Query(..., min_length=1),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    sort: str = Query("relevance", pattern="^(relevance|clicks|updated_at)$"),
+    db: Session = Depends(get_db)
+):
+    query = db.query(Work).filter(
+        or_(
+            Work.title.contains(q, autoescape=True),
+            Work.author.contains(q, autoescape=True),
+            Work.description.contains(q, autoescape=True)
+        )
+    )
+    total = query.count()
+    if sort == "relevance":
+        relevance = case((Work.title == q, 0), (Work.title.contains(q, autoescape=True), 1), else_=2)
+        query = query.order_by(relevance, Work.clicks.desc(), Work.id)
+    else:
+        query = query.order_by(getattr(Work, sort).desc(), Work.id)
+    offset = (page - 1) * page_size
+    works = query.offset(offset).limit(page_size).all()
+    return {
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "works": [WorkResponse.model_validate(w) for w in works]
+    }
+
+
+
 @router.get("/{work_id}", response_model=WorkResponse)
 def get_work(work_id: int, db: Session = Depends(get_db)):
     work = db.query(Work).filter(Work.id == work_id).first()
@@ -79,7 +111,7 @@ def get_work(work_id: int, db: Session = Depends(get_db)):
 def create_work(
     work_data: WorkCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_admin)
 ):
     new_work = Work(
         title=work_data.title,
@@ -93,29 +125,3 @@ def create_work(
     db.commit()
     db.refresh(new_work)
     return WorkResponse.model_validate(new_work)
-
-
-@router.get("/search")
-def search_works(
-    q: str = Query(..., min_length=1),
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
-    db: Session = Depends(get_db)
-):
-    query = db.query(Work).filter(
-        or_(
-            Work.title.contains(q),
-            Work.author.contains(q),
-            Work.description.contains(q)
-        )
-    )
-    total = query.count()
-    offset = (page - 1) * page_size
-    works = query.offset(offset).limit(page_size).all()
-    return {
-        "total": total,
-        "page": page,
-        "page_size": page_size,
-        "works": [WorkResponse.model_validate(w) for w in works]
-    }
-
