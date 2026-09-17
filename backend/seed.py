@@ -4,6 +4,7 @@ sys.path.insert(0, '.')
 
 from app.core.database import SessionLocal, engine
 from app.models.models import Base, Work, Chapter, User
+from app.services.demo_story import demo_title, continuation
 from passlib.hash import bcrypt
 from datetime import datetime, timedelta
 
@@ -55,32 +56,29 @@ def seed_data():
     
     db.commit()
     
-    # Create chapters for each work
-    titles = ["天地初开万古枯", "风云突变", "新的黎明", "危机降临", "新的篇章", "绝地反击", "真相大白", "王者归来", "最终决战", "新的征程"]
-    
+    # Create original demo chapters that follow each work's plot outline.
     for work in works:
         for i in range(1, 11):
-            content = f"""第{i}章
-
-{titles[i-1]}。
-
-{work.author} 笔下的世界，总是让人沉浸其中不能自拔。这是一个关于成长、友情和梦想的故事。
-
-在这个章节里，主角经历了前所未有的挑战。对手很强大，形势很严峻。但是他没有放弃，因为他知道，只要还活着，就有希望。
-
-"或许这就是命运的安排吧。"主角喃喃自语道。
-
-未完待续..."""
+            chapter_title = demo_title(work.title, i)
+            content = continuation(work.title, i, chapter_title)
             chapter = Chapter(
                 work_id=work.id,
                 chapter_number=i,
-                title=f"第{i}章 {titles[i-1]}",
+                title=chapter_title,
                 content=content,
-                word_count=500 + i * 50,
+                word_count=len(content),
                 created_at=datetime.now() - timedelta(days=10-i)
             )
             db.add(chapter)
     
+    db.commit()
+    for work in works:
+        work.word_count = sum(chapter.word_count for chapter in db.query(Chapter).filter(Chapter.work_id == work.id).all())
+    # Track demo content without placing implementation markers in reader text.
+    from sqlalchemy import text
+    db.execute(text("CREATE TABLE IF NOT EXISTS demo_expansions (chapter_id INTEGER PRIMARY KEY, version INTEGER NOT NULL DEFAULT 2)"))
+    for chapter_id, in db.query(Chapter.id).all():
+        db.execute(text("INSERT INTO demo_expansions (chapter_id, version) VALUES (:id, 2)"), {"id": chapter_id})
     db.commit()
     print(f"Created {len(works)} works with 10 chapters each!")
     

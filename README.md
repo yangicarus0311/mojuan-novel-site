@@ -201,6 +201,18 @@ npm run dev
 
 MIT
 
+## 演示章节扩写
+
+仓库里的 8 部种子作品使用原创演示剧情。新运行 `backend/seed.py` 时直接生成较长章节和真实字数。已有本地 SQLite 小说库可运行：
+
+```bash
+cd backend
+python expand_chapters.py ./novel.db       # 查看将扩写的章节数
+python expand_chapters.py ./novel.db --apply
+```
+
+执行前会自动备份数据库。脚本只替换可识别的旧种子占位正文；已有创作保留原文，在结尾追加演示剧情，并用 `demo_expansions` 表避免重复追加。扩写为演示草稿，正式发表前建议逐章编辑。阅读器默认翻页并显示实际页码；页数随屏幕和字号变化。
+
 ## 回归验证
 
 ```bash

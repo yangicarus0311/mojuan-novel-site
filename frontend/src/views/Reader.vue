@@ -10,6 +10,7 @@
             <span class="chapter-title">{{ chapter?.title }}</span>
           </div>
           <div class="header-right">
+            <span v-if="readingMode === 'pagination'" class="page-number">{{ currentPage + 1 }} / {{ totalPages }} 页</span>
             <span class="progress-text">{{ progressPercent }}%</span>
             <button class="icon-btn menu-btn" @click.stop="showMenu = !showMenu">☰</button>
           </div>
@@ -237,7 +238,7 @@ const chapterPrice = ref(0)
 const showMenu = ref(false)
 
 // 阅读模式
-const readingMode = ref(localStorage.getItem('novel_reading_mode') === 'pagination' ? 'pagination' : 'scroll')
+const readingMode = ref(localStorage.getItem('novel_reading_mode') === 'scroll' ? 'scroll' : 'pagination')
 
 // 阅读设置
 const fontSize = ref(Math.max(12, Math.min(36, parseInt(localStorage.getItem('novel_font_size')) || 18)))
@@ -859,16 +860,19 @@ onUnmounted(() => {
 .reader-main {
   height: 100dvh;
   padding-top: 56px;
-  padding-bottom: 60px;
+  padding-bottom: 110px;
   position: relative;
 }
 
 /* Pagination Mode */
 .page-container {
-  max-width: 800px;
+  max-width: 560px;
   margin: 0 auto;
   padding: 24px 20px;
-  height: 100%;
+  height: min(100%, 784px);
+  position: relative;
+  top: 50%;
+  transform: translateY(-50%);
   overflow: hidden;
 }
 
@@ -1483,6 +1487,7 @@ onUnmounted(() => {
     padding: 24px 16px;
   }
 }
+.page-number { font-size: 12px; color: var(--text-muted, #aaa); white-space: nowrap; }
 .reader-status { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; justify-content: center; height: 100%; padding: 24px; }
 .reader-status button { padding: 10px 16px; background: var(--section-bg); color: inherit; border: 1px solid var(--accent); border-radius: 8px; }
 </style>
